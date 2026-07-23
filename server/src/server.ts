@@ -99,7 +99,16 @@ function serveStatic(urlPath: string, res: http.ServerResponse) {
       res.writeHead(404, { "content-type": "text/plain" }).end("not found");
       return;
     }
-    res.writeHead(200, { "content-type": CONTENT_TYPES[path.extname(abs)] || "application/octet-stream" }).end(data);
+    const ext = path.extname(abs);
+    // Static assets (video, images, fonts, js) are cacheable; the HTML isn't,
+    // so page edits show up without a hard refresh.
+    const cache = ext === ".html" ? "no-cache" : "public, max-age=86400";
+    res
+      .writeHead(200, {
+        "content-type": CONTENT_TYPES[ext] || "application/octet-stream",
+        "cache-control": cache,
+      })
+      .end(data);
   });
 }
 
