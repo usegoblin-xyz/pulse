@@ -1,6 +1,6 @@
 # Pulse
 
-**Live landing page: [drbinna.github.io/pulse](https://drbinna.github.io/pulse/)**
+**Live landing page: [usegoblin-xyz.github.io/pulse](https://usegoblin-xyz.github.io/pulse/)**
 
 Pulse is the agent on your screen that fills the forms, finds the buttons, and
 walks you through the web's most stubborn sites. Where Kara makes things,
@@ -12,7 +12,7 @@ Full character definition, voice rules, and hard guardrails: [PERSONA.md](PERSON
 
 - `site/` — the landing page. Self-contained: open `site/index.html` directly
   or serve the folder statically.
-  Live at https://drbinna.github.io/pulse/ via GitHub Pages (root index.html
+  Live at https://usegoblin-xyz.github.io/pulse/ via GitHub Pages (root index.html
   forwards to `site/`). The poster is `pulse-beam-loop.mp4` (17.2 MB,
   seamless 20 s palindrome loop) referenced by relative path; swap to a CDN URL
   once hosting is settled. Gulax font (Velvetyne, SIL OFL — `fonts/LICENSE.txt`
