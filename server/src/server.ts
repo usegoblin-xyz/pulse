@@ -100,9 +100,11 @@ function serveStatic(urlPath: string, res: http.ServerResponse) {
       return;
     }
     const ext = path.extname(abs);
-    // Static assets (video, images, fonts, js) are cacheable; the HTML isn't,
-    // so page edits show up without a hard refresh.
-    const cache = ext === ".html" ? "no-cache" : "public, max-age=86400";
+    // App logic (html/js) must always revalidate so a deploy is picked up
+    // immediately — a stale cached pulse.js is a debugging nightmare. Heavy
+    // media (video/images/fonts) is content-stable, so cache it hard.
+    const codeExt = ext === ".html" || ext === ".js" || ext === ".mjs";
+    const cache = codeExt ? "no-cache" : "public, max-age=86400";
     res
       .writeHead(200, {
         "content-type": CONTENT_TYPES[ext] || "application/octet-stream",
