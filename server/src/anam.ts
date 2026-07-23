@@ -38,7 +38,9 @@ export function anamConfigFromEnv(env = process.env): AnamConfig {
     // Anam's built-in LLM (same default Goblin Labs uses), so the system prompt
     // below actually drives the conversation.
     llmId: env.PULSE_LLM_ID || "a7cf662c-2ace-4de1-a21e-ef0fbf144bb7",
-    avatarModel: env.PULSE_AVATAR_MODEL || "cara-3",
+    // The Pulse avatar only ships cara-4 (no cara-3), so pin cara-4 — passing a
+    // version the avatar doesn't have makes Anam reject the session at connect.
+    avatarModel: env.PULSE_AVATAR_MODEL || "cara-4",
     systemPrompt: env.PULSE_SYSTEM_PROMPT || PULSE_SYSTEM_PROMPT,
   };
 }
