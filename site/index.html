@@ -131,19 +131,14 @@
       </aside>
     </main>
 
-    <!-- wiring targets for when Pulse gets its own brain/avatar stack; not part of this page's look -->
+    <!-- No file box: Pulse is computer-use (fills forms in place), not a
+         document generator. Chat history stays offstage for future wiring. -->
     <div class="offstage">
       <div id="chat-history"></div>
-      <div id="draft-panel">
-        <span id="draft-title"></span>
-        <span id="draft-status"></span>
-        <iframe id="draft-frame"></iframe>
-        <pre id="draft-text"></pre>
-      </div>
     </div>
 
     <!-- Wires "Start conversation" to a live Anam avatar session via the brain
-         (server/). The brain holds the Anam key; this page carries no secret. -->
-    <script type="module" src="pulse.js?v=2"></script>
+         (server/), and connects the avatar to the form-filler (fill_form tool). -->
+    <script type="module" src="pulse.js?v=3"></script>
   </body>
 </html>

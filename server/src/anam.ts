@@ -45,6 +45,19 @@ export function anamConfigFromEnv(env = process.env): AnamConfig {
   };
 }
 
+// Declared to Anam at mint time so Pulse's LLM knows it can call it. The
+// browser handler that runs when Pulse invokes it is registered client-side in
+// pulse.js (it scans the page, plans the fill, and types the values in). Anam
+// honors inline tool defs on ephemeral mints, so no pre-created tool is needed.
+export const FILL_FORM_TOOL = {
+  type: "client",
+  name: "fill_form",
+  description:
+    "Fill the form on the user's current screen from their saved details. Call this the moment the user asks you to fill out, complete, or auto-fill a form. It reads the visible form's fields, fills the ones it can, and NEVER submits. Returns a short summary of what was filled and what still needs the user (including any password or payment field, which you must never fill).",
+  parameters: { type: "object", properties: {}, required: [] },
+  awaitResult: true,
+} as const;
+
 /** Pure: the personaConfig we send to Anam. Split out so it's unit-testable. */
 export function buildPersonaConfig(cfg: AnamConfig): Record<string, unknown> {
   if (cfg.personaId) return { personaId: cfg.personaId };
@@ -55,6 +68,7 @@ export function buildPersonaConfig(cfg: AnamConfig): Record<string, unknown> {
     llmId: cfg.llmId,
     avatarModel: cfg.avatarModel,
     systemPrompt: cfg.systemPrompt,
+    tools: [FILL_FORM_TOOL],
   };
 }
 
