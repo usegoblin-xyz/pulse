@@ -22,7 +22,8 @@ one origin — no CORS, no mixed-content. In production you'd host the brain
 
 ## Who Pulse is on the call
 
-- **Avatar:** `a3f92a18-ff4b-405d-9c40-de4acf96f0e4` (the one you provided).
+- **Avatar:** `a2f0f964-6d5d-4bd9-81fe-973ef6a6215b` (the "Pulse" avatar in the
+  Anam account; the id first supplied, a3f92a18…, did not exist there).
 - **Voice:** Laurent — "Dependable Anchor," strong and steady. Swap via
   `PULSE_VOICE_ID`; other male voices in the account are Archie, Corey, Cooper.
 - **Brain:** Anam's built-in LLM, driven by the system prompt in

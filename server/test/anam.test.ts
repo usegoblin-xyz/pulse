@@ -7,7 +7,7 @@ test("default persona config is Pulse: given avatar, a real voice, the prompt", 
   const cfg = anamConfigFromEnv({} as NodeJS.ProcessEnv);
   const pc = buildPersonaConfig(cfg) as Record<string, string>;
   assert.equal(pc.name, "Pulse");
-  assert.equal(pc.avatarId, "a3f92a18-ff4b-405d-9c40-de4acf96f0e4");
+  assert.equal(pc.avatarId, "a2f0f964-6d5d-4bd9-81fe-973ef6a6215b");
   assert.equal(pc.voiceId, "8e67ed57-4fc0-11f1-84b0-52bacf74fa75"); // Laurent
   assert.equal(pc.systemPrompt, PULSE_SYSTEM_PROMPT);
   assert.ok(!("personaId" in pc));

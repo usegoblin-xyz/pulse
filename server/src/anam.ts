@@ -27,8 +27,10 @@ export function anamConfigFromEnv(env = process.env): AnamConfig {
     apiKey: env.ANAM_API_KEY || "",
     personaId: env.PULSE_PERSONA_ID || undefined,
     name: env.PULSE_NAME || "Pulse",
-    // The avatar you provided. Override with PULSE_AVATAR_ID.
-    avatarId: env.PULSE_AVATAR_ID || "a3f92a18-ff4b-405d-9c40-de4acf96f0e4",
+    // The "Pulse" avatar in the Anam account. (The originally-supplied id
+    // a3f92a18… did not exist in the account; this is the real one.) Override
+    // with PULSE_AVATAR_ID.
+    avatarId: env.PULSE_AVATAR_ID || "a2f0f964-6d5d-4bd9-81fe-973ef6a6215b",
     // Laurent — "Dependable Anchor", strong and steady, fits Pulse's calm edge.
     // Other male voices in the account: Archie 91b4ce0f-…, Corey 91a47e5a-…,
     // Cooper 90c1fb05-… (all share the -4fc0-11f1-84b0-52bacf74fa75 suffix).
