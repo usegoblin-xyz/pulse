@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        width: 320px; margin: 0; padding: 14px;
+        font: 13px/1.5 system-ui, sans-serif; background: #0a0a0a; color: #f0efe9;
+      }
+      h1 { font-size: 14px; margin: 0 0 2px; letter-spacing: .04em; }
+      p.sub { margin: 0 0 12px; color: rgba(255,255,255,.5); font-size: 11.5px; }
+      label { display: block; font-size: 11px; color: rgba(255,255,255,.55); margin: 10px 0 4px; }
+      textarea, input {
+        width: 100%; box-sizing: border-box; background: #141414; color: #f0efe9;
+        border: 1px solid rgba(255,255,255,.15); border-radius: 8px; padding: 8px; font: inherit;
+      }
+      textarea { height: 150px; resize: vertical; font-family: ui-monospace, monospace; font-size: 12px; }
+      .row { display: flex; gap: 8px; margin-top: 12px; }
+      button {
+        flex: 1; padding: 9px; border: none; border-radius: 999px; font: inherit;
+        font-weight: 600; cursor: pointer;
+      }
+      #fill { background: #fff; color: #111; }
+      #save { background: rgba(255,255,255,.08); color: #fff; border: 1px solid rgba(255,255,255,.2); }
+      #status { margin-top: 10px; font-size: 12px; min-height: 1.4em; }
+      #status[data-kind="ok"] { color: #7fd18f; }
+      #status[data-kind="err"] { color: #e58a8a; }
+      #status[data-kind="info"] { color: rgba(255,255,255,.6); }
+    </style>
+  </head>
+  <body>
+    <h1>Pulse</h1>
+    <p class="sub">Fills forms from your saved details. Never submits — that stays your call.</p>
+
+    <label for="profile">Your details (JSON, stays on this device)</label>
+    <textarea id="profile" spellcheck="false" placeholder='{ "fullName": "Ada Lovelace", "email": "ada@example.com", "city": "London" }'></textarea>
+
+    <label for="brain">Brain URL</label>
+    <input id="brain" type="text" spellcheck="false" placeholder="http://localhost:8787" />
+
+    <div class="row">
+      <button id="save">Save</button>
+      <button id="fill">Fill this form</button>
+    </div>
+    <div id="status" data-kind="info"></div>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
