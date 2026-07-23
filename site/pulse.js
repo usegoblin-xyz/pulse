@@ -28,13 +28,24 @@ function setStatus(text) {
 async function start() {
   startBtn.disabled = true;
   setStatus("Waking Pulse up…");
+
+  // Step 1: get a session token from the brain.
+  let sessionToken;
   try {
     const res = await fetch(`${BRAIN}/session-token`, { method: "POST" });
     if (!res.ok) throw new Error(`session ${res.status}`);
-    const { sessionToken } = await res.json();
+    ({ sessionToken } = await res.json());
+  } catch (err) {
+    console.error("[pulse] token failed:", err);
+    setStatus("Couldn't reach Pulse right now. Give it a second and press Start again.");
+    startBtn.disabled = false;
+    return;
+  }
 
+  // Step 2: stream the avatar. This asks for your microphone (Pulse needs to
+  // hear you); a dismissed or blocked mic prompt is the usual failure here.
+  try {
     client = createClient(sessionToken);
-
     client.addListener(AnamEvent.SESSION_READY, () => {
       setStatus("Connected. Just talk to Pulse.");
       stopBtn.disabled = false;
@@ -43,14 +54,14 @@ async function start() {
       client.talk(GREETING); // Pulse speaks first
     });
     client.addListener(AnamEvent.CONNECTION_CLOSED, stop);
-
     await client.streamToVideoElement("persona-video");
   } catch (err) {
-    console.error("[pulse] start failed:", err);
+    console.error("[pulse] stream failed:", err);
+    const denied = String(err?.name || err?.message || "").match(/permission|denied|NotAllowed/i);
     setStatus(
-      BRAIN
-        ? "Couldn't reach Pulse. Is the brain running?"
-        : "Couldn't reach Pulse. Run the brain (server/) and open this page from it.",
+      denied
+        ? "Pulse needs your microphone. Allow it in the address bar, then press Start."
+        : "Couldn't start the video. Check mic access and press Start again.",
     );
     startBtn.disabled = false;
   }
