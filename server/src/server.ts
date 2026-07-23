@@ -36,7 +36,7 @@ const model = makeOpenAIModel(modelConfigFromEnv());
 // Minimal per-IP rate limit for /session-token — it mints paid Anam sessions
 // on a public endpoint, so cap how fast one caller can spend. In-memory, which
 // is fine on a single machine (the only way this app is meant to run).
-const RL_MAX = Number(process.env.PULSE_SESSION_RATE_MAX || 12); // per window
+const RL_MAX = Number(process.env.PULSE_SESSION_RATE_MAX || 40); // per window
 const RL_WINDOW_MS = Number(process.env.PULSE_SESSION_RATE_WINDOW_MS || 10 * 60 * 1000);
 const rlHits = new Map<string, number[]>();
 function rateLimited(ip: string): boolean {
