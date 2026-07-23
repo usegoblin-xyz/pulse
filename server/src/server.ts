@@ -33,6 +33,24 @@ const SITE_DIR = process.env.PULSE_SITE_DIR || path.resolve(__dirname, "../../..
 
 const model = makeOpenAIModel(modelConfigFromEnv());
 
+// Minimal per-IP rate limit for /session-token — it mints paid Anam sessions
+// on a public endpoint, so cap how fast one caller can spend. In-memory, which
+// is fine on a single machine (the only way this app is meant to run).
+const RL_MAX = Number(process.env.PULSE_SESSION_RATE_MAX || 12); // per window
+const RL_WINDOW_MS = Number(process.env.PULSE_SESSION_RATE_WINDOW_MS || 10 * 60 * 1000);
+const rlHits = new Map<string, number[]>();
+function rateLimited(ip: string): boolean {
+  const now = Date.now();
+  const fresh = (rlHits.get(ip) || []).filter((t) => now - t < RL_WINDOW_MS);
+  fresh.push(now);
+  rlHits.set(ip, fresh);
+  return fresh.length > RL_MAX;
+}
+function clientIp(req: http.IncomingMessage): string {
+  const fwd = (req.headers["x-forwarded-for"] as string) || "";
+  return fwd.split(",")[0].trim() || req.socket.remoteAddress || "unknown";
+}
+
 function allowOrigin(origin?: string): string | null {
   if (!origin) return null;
   if (origin.startsWith("chrome-extension://")) return origin; // the extension
@@ -108,6 +126,10 @@ const server = http.createServer(async (req, res) => {
 
   // --- Anam: mint a Pulse session token ---
   if (req.method === "POST" && req.url === "/session-token") {
+    if (rateLimited(clientIp(req))) {
+      res.writeHead(429, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "slow down" }));
+      return;
+    }
     try {
       const sessionToken = await mintSessionToken(anamConfigFromEnv());
       res.writeHead(200, { "content-type": "application/json", ...cors }).end(JSON.stringify({ sessionToken }));
