@@ -142,7 +142,8 @@
       </div>
     </div>
 
-    <!-- No auth or app script yet: Pulse is hosted separately from Kara.
-         When wiring it up, this is where Clerk (or its own auth) and its script.js go. -->
+    <!-- Wires "Start conversation" to a live Anam avatar session via the brain
+         (server/). The brain holds the Anam key; this page carries no secret. -->
+    <script type="module" src="pulse.js"></script>
   </body>
 </html>

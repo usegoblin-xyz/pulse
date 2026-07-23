@@ -1,30 +1,43 @@
-// The key-holding proxy. The extension can't carry the model API key (it ships
-// to users' browsers), so it POSTs form fields + profile here and gets back a
-// FillPlan. Zero runtime dependencies — Node's built-in http + global fetch.
+// The key-holding proxy. Two secrets it holds so the browser never has to: the
+// model API key (for /plan-fill) and the Anam API key (for /session-token). It
+// also serves the Pulse landing page in dev, so page + endpoints are one origin
+// and "Start conversation" just works. Zero runtime deps — Node http + fetch.
 //
-//   POST /plan-fill   { fields: FormField[], profile: Profile }  -> FillPlan
-//   GET  /health      -> { ok: true }
+//   POST /plan-fill      { fields, profile }  -> { fills, asks }
+//   POST /session-token  -> { sessionToken }   (Anam, persona = Pulse)
+//   GET  /health         -> { ok: true }
+//   GET  /*              -> static file from ../site (dev convenience)
 
 import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { planFill } from "./planner.js";
 import { makeOpenAIModel, modelConfigFromEnv } from "./model.js";
+import { mintSessionToken, anamConfigFromEnv } from "./anam.js";
 import type { FormField, Profile } from "./types.js";
 
 const PORT = Number(process.env.PORT || 8787);
 const MAX_BODY = 256 * 1024; // form field metadata is small; cap to refuse abuse
-// Comma-separated allowlist of extension origins, e.g.
-// "chrome-extension://<id>". Empty = reflect any chrome-extension origin (dev).
-const ALLOWED = (process.env.PULSE_ALLOWED_ORIGINS || "")
+
+// Web origins allowed to call the API cross-origin (when the page is hosted
+// apart from this server, e.g. GitHub Pages). Same-origin dev needs nothing here.
+const WEB_ORIGINS = (process.env.PULSE_WEB_ORIGINS || "https://usegoblin-xyz.github.io")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// dist/src/server.js -> repo/site
+const SITE_DIR = process.env.PULSE_SITE_DIR || path.resolve(__dirname, "../../../site");
+
 const model = makeOpenAIModel(modelConfigFromEnv());
 
-function corsOrigin(origin?: string): string | null {
+function allowOrigin(origin?: string): string | null {
   if (!origin) return null;
-  if (ALLOWED.length) return ALLOWED.includes(origin) ? origin : null;
-  return origin.startsWith("chrome-extension://") ? origin : null; // dev default
+  if (origin.startsWith("chrome-extension://")) return origin; // the extension
+  if (origin.startsWith("http://localhost")) return origin; // dev
+  return WEB_ORIGINS.includes(origin) ? origin : null;
 }
 
 function readBody(req: http.IncomingMessage): Promise<string> {
@@ -41,8 +54,39 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   });
 }
 
+const CONTENT_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".mp4": "video/mp4",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
+  ".txt": "text/plain; charset=utf-8",
+};
+
+function serveStatic(urlPath: string, res: http.ServerResponse) {
+  const clean = decodeURIComponent(urlPath.split("?")[0]);
+  const rel = clean === "/" ? "index.html" : clean.replace(/^\/+/, "");
+  const abs = path.resolve(SITE_DIR, rel);
+  if (!abs.startsWith(SITE_DIR + path.sep) && abs !== path.join(SITE_DIR, "index.html")) {
+    res.writeHead(403).end("forbidden"); // path traversal guard
+    return;
+  }
+  fs.readFile(abs, (err, data) => {
+    if (err) {
+      res.writeHead(404, { "content-type": "text/plain" }).end("not found");
+      return;
+    }
+    res.writeHead(200, { "content-type": CONTENT_TYPES[path.extname(abs)] || "application/octet-stream" }).end(data);
+  });
+}
+
 const server = http.createServer(async (req, res) => {
-  const origin = corsOrigin(req.headers.origin as string | undefined);
+  const origin = allowOrigin(req.headers.origin as string | undefined);
   const cors: Record<string, string> = origin
     ? {
         "access-control-allow-origin": origin,
@@ -56,25 +100,46 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(origin ? 204 : 403, cors).end();
     return;
   }
+
   if (req.method === "GET" && req.url === "/health") {
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true }));
     return;
   }
-  if (req.method !== "POST" || req.url !== "/plan-fill") {
-    res.writeHead(404, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "not found" }));
+
+  // --- Anam: mint a Pulse session token ---
+  if (req.method === "POST" && req.url === "/session-token") {
+    try {
+      const sessionToken = await mintSessionToken(anamConfigFromEnv());
+      res.writeHead(200, { "content-type": "application/json", ...cors }).end(JSON.stringify({ sessionToken }));
+    } catch (e: any) {
+      console.error("[session-token]", e?.message ?? e);
+      res.writeHead(502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not start session" }));
+    }
     return;
   }
 
-  try {
-    const body = JSON.parse((await readBody(req)) || "{}");
-    const fields: FormField[] = Array.isArray(body.fields) ? body.fields.slice(0, 300) : [];
-    const profile: Profile = body.profile && typeof body.profile === "object" ? body.profile : {};
-    const plan = await planFill(fields, profile, model);
-    res.writeHead(200, { "content-type": "application/json", ...cors }).end(JSON.stringify(plan));
-  } catch (e: any) {
-    console.error("[plan-fill]", e?.message ?? e);
-    res.writeHead(400, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not plan fill" }));
+  // --- form-fill planner ---
+  if (req.method === "POST" && req.url === "/plan-fill") {
+    try {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      const fields: FormField[] = Array.isArray(body.fields) ? body.fields.slice(0, 300) : [];
+      const profile: Profile = body.profile && typeof body.profile === "object" ? body.profile : {};
+      const plan = await planFill(fields, profile, model);
+      res.writeHead(200, { "content-type": "application/json", ...cors }).end(JSON.stringify(plan));
+    } catch (e: any) {
+      console.error("[plan-fill]", e?.message ?? e);
+      res.writeHead(400, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not plan fill" }));
+    }
+    return;
   }
+
+  // --- static landing page (dev) ---
+  if (req.method === "GET" && req.url) {
+    serveStatic(req.url, res);
+    return;
+  }
+
+  res.writeHead(404, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "not found" }));
 });
 
-server.listen(PORT, () => console.log(`pulse brain on :${PORT}`));
+server.listen(PORT, () => console.log(`pulse brain on http://localhost:${PORT}`));
