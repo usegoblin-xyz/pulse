@@ -1,0 +1,17 @@
+{
+  "name": "pulse-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pulse MV3 browser extension: reads a form, fills it from your local vault, never submits.",
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test \"test/**/*.test.mjs\""
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  }
+}
