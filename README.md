@@ -17,6 +17,8 @@ Full character definition, voice rules, and hard guardrails: [PERSONA.md](PERSON
   seamless 20 s palindrome loop) referenced by relative path; swap to a CDN URL
   once hosting is settled. Gulax font (Velvetyne, SIL OFL — `fonts/LICENSE.txt`
   must travel with the page) is used for the wordmark only.
+- `masters/` — the source beam assets (4K still, 2K static master, and the
+  baked loop). How they were made: `docs/sessions/2026-07-23-origin.md`.
 - `docs/beam-effect.md` — recipe for the materialization beam look, copied from
   the Kara-3 repo where the effect originated. Pulse's loop was built with it.
 
