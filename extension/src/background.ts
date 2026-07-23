@@ -1,26 +1,28 @@
-// Service worker: orchestrates one fill. It injects the content script into the
-// active tab (only on the user's click — activeTab, not a standing content
-// script on every page), scans the form, asks the brain for a plan, and hands
-// the fills back to the page. The brain URL and profile come from the local
-// vault; the model API key lives on the brain, never here.
+// Service worker. Fills a form on a tab: inject the content script, scan the
+// fields, ask the brain's /plan-fill for values, apply them — never submit.
+// Two triggers:
+//   - the popup's "Fill this form" button   -> fill the tab the user is on
+//   - the Pulse avatar (via the page relay)  -> fill the tab the user is looking
+//     at while Pulse floats over it (Companion mode)
 
 import { getProfile, getBrainUrl } from "./vault.js";
-import type { FormField, FillPlan } from "./types.js";
+import type { FormField, FillPlan, Profile } from "./types.js";
 
-async function fillActiveTab(): Promise<{ ok: boolean; plan?: FillPlan; applied?: number; error?: string }> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) return { ok: false, error: "no active tab" };
-  if (/^(chrome|edge|about|chrome-extension):/.test(tab.url || "")) {
-    return { ok: false, error: "Pulse can't act on browser pages — open a real website." };
-  }
+const RESTRICTED = /^(chrome|edge|about|chrome-extension|devtools|view-source):/;
 
-  await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+async function fillTab(
+  tabId: number,
+  opts: { brainUrl?: string; profile?: Profile } = {},
+): Promise<{ ok: boolean; applied?: number; asks?: number; error?: string }> {
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
 
-  const scan = (await chrome.tabs.sendMessage(tab.id, { cmd: "scan" })) as { fields: FormField[] };
+  const scan = (await chrome.tabs.sendMessage(tabId, { cmd: "scan" })) as { fields: FormField[] };
   const fields = scan?.fields ?? [];
-  if (!fields.length) return { ok: true, plan: { fills: [], asks: [] }, applied: 0 };
+  if (!fields.length) return { ok: true, applied: 0, asks: 0 };
 
-  const [profile, brainUrl] = await Promise.all([getProfile(), getBrainUrl()]);
+  const brainUrl = (opts.brainUrl || (await getBrainUrl())).replace(/\/$/, "");
+  const profile = opts.profile ?? (await getProfile());
+
   let plan: FillPlan;
   try {
     const res = await fetch(`${brainUrl}/plan-fill`, {
@@ -34,16 +36,51 @@ async function fillActiveTab(): Promise<{ ok: boolean; plan?: FillPlan; applied?
     return { ok: false, error: `couldn't reach the brain at ${brainUrl}` };
   }
 
-  const result = (await chrome.tabs.sendMessage(tab.id, { cmd: "apply", fills: plan.fills })) as {
+  const applied = (await chrome.tabs.sendMessage(tabId, { cmd: "apply", fills: plan.fills })) as {
     applied: number;
   };
-  return { ok: true, plan, applied: result?.applied ?? 0 };
+  return { ok: true, applied: applied?.applied ?? 0, asks: (plan.asks ?? []).length };
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+/** The tab the user is actually looking at — never the Pulse page or a chrome:// page. */
+async function resolveTargetTab(excludeTabId?: number): Promise<chrome.tabs.Tab | null> {
+  const [focused] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (focused && focused.id !== excludeTabId && !RESTRICTED.test(focused.url || "")) return focused;
+  // Fall back to the most recently accessed normal tab that isn't the caller.
+  const tabs = await chrome.tabs.query({});
+  return (
+    tabs
+      .filter((t) => t.id !== excludeTabId && t.url && !RESTRICTED.test(t.url))
+      .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0] || null
+  );
+}
+
+async function fillActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || RESTRICTED.test(tab.url || "")) {
+    return { ok: false, error: "Open a real website first." };
+  }
+  return fillTab(tab.id);
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  // From the popup: fill the tab the user is on.
   if (msg?.type === "fillActiveTab") {
     fillActiveTab().then(reply);
-    return true; // async reply
+    return true;
+  }
+  // From the Pulse page relay: fill the form tab the user is looking at.
+  if (msg?.type === "fillForPulse") {
+    (async () => {
+      const target = await resolveTargetTab(sender.tab?.id);
+      if (!target?.id) return reply({ ok: false, error: "no form tab" });
+      reply(await fillTab(target.id, { brainUrl: msg.brainUrl, profile: msg.profile }));
+    })();
+    return true;
+  }
+  if (msg?.type === "pulsePing") {
+    reply({ ok: true });
+    return true;
   }
   return false;
 });

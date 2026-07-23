@@ -12,6 +12,7 @@
 
 import type { FormField, Profile, FillPlan, FillItem, AskItem } from "./types.js";
 import { isSensitive } from "./sensitive.js";
+import { heuristicFill } from "./heuristic.js";
 
 export interface ModelClient {
   /** Returns the model's raw text reply (expected to be a JSON object). */
@@ -65,7 +66,7 @@ function publicField(f: FormField) {
 export async function planFill(
   fields: FormField[],
   profile: Profile,
-  model: ModelClient,
+  model: ModelClient | null,
 ): Promise<FillPlan> {
   const sensitive = fields.filter((f) => f.sensitive || isSensitive(f));
   const safe = fields.filter((f) => !(f.sensitive || isSensitive(f)));
@@ -82,31 +83,35 @@ export async function planFill(
     Object.entries(profile).filter(([k]) => !isSensitive({ name: k, label: k })),
   );
 
-  const fills: FillItem[] = [];
-  if (safe.length > 0) {
-    const known = new Map(safe.map((f) => [f.id, f]));
-    const user = JSON.stringify({ fields: safe.map(publicField), profile: safeProfile });
+  // Pass 1 (free, deterministic): map standard fields by autocomplete/label.
+  const fills: FillItem[] = heuristicFill(safe, safeProfile);
+  const filledIds = new Set(fills.map((x) => x.fieldId));
+
+  // Pass 2 (optional): only if a model is configured, only for what's left.
+  const leftover = safe.filter((f) => !filledIds.has(f.id));
+  if (model && leftover.length > 0) {
+    const known = new Map(leftover.map((f) => [f.id, f]));
+    const user = JSON.stringify({ fields: leftover.map(publicField), profile: safeProfile });
     const parsed = safeParseObject(await model.complete(SYSTEM_PROMPT, user));
     const proposed = Array.isArray(parsed?.fills) ? parsed.fills : [];
-
     for (const item of proposed) {
       const fieldId = String(item?.fieldId ?? "");
       const value = item?.value;
-      const field = known.get(fieldId); // unknown/sensitive ids simply aren't here
+      const field = known.get(fieldId); // unknown/sensitive/already-filled ids aren't here
       if (!field) continue;
       if (typeof value !== "string" || value.trim() === "") continue;
       if (field.options?.length && !field.options.includes(value)) continue;
       fills.push({ fieldId, value });
+      filledIds.add(fieldId);
     }
+  }
 
-    const filled = new Set(fills.map((x) => x.fieldId));
-    for (const f of safe) {
-      if (f.required && !filled.has(f.id)) {
-        asks.push({
-          fieldId: f.id,
-          prompt: `Pulse could not find a value for ${f.label || f.name || f.id}.`,
-        });
-      }
+  for (const f of safe) {
+    if (f.required && !filledIds.has(f.id)) {
+      asks.push({
+        fieldId: f.id,
+        prompt: `Pulse could not find a value for ${f.label || f.name || f.id}.`,
+      });
     }
   }
 

@@ -10,6 +10,7 @@ await mkdir("dist", { recursive: true });
 
 await Promise.all([
   build({ ...common, entryPoints: ["src/content.ts"], outfile: "dist/content.js", format: "iife" }),
+  build({ ...common, entryPoints: ["src/relay.ts"], outfile: "dist/relay.js", format: "iife" }),
   build({ ...common, entryPoints: ["src/background.ts"], outfile: "dist/background.js", format: "esm" }),
   build({ ...common, entryPoints: ["src/popup.ts"], outfile: "dist/popup.js", format: "esm" }),
 ]);

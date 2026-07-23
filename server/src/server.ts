@@ -31,7 +31,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // dist/src/server.js -> repo/site
 const SITE_DIR = process.env.PULSE_SITE_DIR || path.resolve(__dirname, "../../../site");
 
-const model = makeOpenAIModel(modelConfigFromEnv());
+// The model is optional: with no key, /plan-fill runs heuristic-only (still
+// fills standard fields for free). With a key, the model handles leftovers.
+const modelCfg = modelConfigFromEnv();
+const model = modelCfg.apiKey ? makeOpenAIModel(modelCfg) : null;
 
 // Minimal per-IP rate limit for /session-token — it mints paid Anam sessions
 // on a public endpoint, so cap how fast one caller can spend. In-memory, which

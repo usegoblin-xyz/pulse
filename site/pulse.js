@@ -25,6 +25,36 @@ let client = null;
 let screenStream = null;
 let companionWin = null;
 
+/* ---------- extension bridge (fill forms on any tab) ----------
+ * The Pulse extension injects a relay content script on this page. We talk to
+ * it over window.postMessage; it carries the fill to whatever tab the user is
+ * looking at (Companion mode). If the extension isn't installed, fill_form
+ * falls back to filling a form on THIS page. */
+const EXT = "pulse-ext", PAGE = "pulse-page";
+let extPresent = false;
+let msgId = 0;
+const pending = new Map();
+
+window.addEventListener("message", (ev) => {
+  if (ev.source !== window || ev.data?.source !== EXT) return;
+  const { cmd, id, result } = ev.data;
+  if (cmd === "ready" || cmd === "pong") extPresent = true;
+  if (cmd === "fill-result" && pending.has(id)) { pending.get(id)(result); pending.delete(id); }
+});
+
+function extCall(cmd, extra = {}, timeoutMs = 20000) {
+  return new Promise((resolve) => {
+    const id = ++msgId;
+    const done = (r) => resolve(r);
+    pending.set(id, done);
+    window.postMessage({ source: PAGE, cmd, id, ...extra }, window.location.origin);
+    setTimeout(() => { if (pending.has(id)) { pending.delete(id); resolve(null); } }, timeoutMs);
+  });
+}
+
+// Detect the extension shortly after load (it also announces itself via "ready").
+extCall("ping", {}, 600).then((r) => { if (r) extPresent = true; });
+
 function setStatus(text) {
   if (status) { status.textContent = text; status.style.display = "block"; }
 }
@@ -80,8 +110,22 @@ function applyFills(fills) {
   return applied; // NOTE: never .submit() — filling only.
 }
 async function fillForm() {
+  // Preferred path: the extension fills the real site the user is looking at.
+  if (extPresent) {
+    const r = await extCall("fill", { brainUrl: BRAIN || window.location.origin });
+    if (r == null) return "My browser helper didn't answer. Make sure the Pulse extension is on and try again.";
+    if (!r.ok) {
+      if (r.error === "no form tab") return "Open the page with the form in another tab, then ask me again.";
+      if (String(r.error || "").includes("no details")) return "I don't have your details saved yet. Open the Pulse extension and add them.";
+      return "I couldn't fill that just now. Give it another go in a moment.";
+    }
+    const asks = r.asks || 0;
+    return `Filled ${r.applied || 0} field${r.applied === 1 ? "" : "s"} on the page. I did not submit anything.${asks ? ` ${asks} still need you, including anything sensitive like a password.` : ""}`;
+  }
+
+  // Fallback: no extension — fill a form on THIS page if there is one.
   const fields = scanForm();
-  if (!fields.length) return "There's no form on this screen. Open the page with the form and I'll take it from there.";
+  if (!fields.length) return "There's no form on this screen, and I don't see the Pulse browser helper. Open the page with the form, or load the extension so I can reach it.";
   let profile = {};
   try { profile = JSON.parse(localStorage.getItem("pulse.profile") || "{}"); } catch {}
   if (!Object.keys(profile).length) return "I don't have your details saved yet. Tell me your name and I'll start there.";
