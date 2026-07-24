@@ -186,6 +186,51 @@ async function fillSamePage() {
   return `Filled ${applied} field${applied === 1 ? "" : "s"}. I did not submit anything.${asks ? ` ${asks} still need you, including anything sensitive like a password.` : ""}`;
 }
 
+/* ---------- vision: look at the shared screen ---------- */
+async function captureScreenFrame() {
+  const track = screenStream?.getVideoTracks?.()[0];
+  if (!track) return null;
+  try {
+    const bitmap = await new ImageCapture(track).grabFrame();
+    const scale = Math.min(1, 1280 / bitmap.width);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.6);
+  } catch {
+    // Fallback: draw a video element playing the stream.
+    return await new Promise((resolve) => {
+      const v = document.createElement("video");
+      v.srcObject = screenStream; v.muted = true;
+      v.onloadedmetadata = () => { v.play(); setTimeout(() => {
+        const scale = Math.min(1, 1280 / v.videoWidth);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(v.videoWidth * scale);
+        canvas.height = Math.round(v.videoHeight * scale);
+        canvas.getContext("2d").drawImage(v, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.6));
+      }, 200); };
+      v.onerror = () => resolve(null);
+    });
+  }
+}
+
+async function lookAtScreen() {
+  if (!screenStream) return "You haven't shared your screen yet. Click Share screen, pick the window with the form, and I'll take a look.";
+  const image = await captureScreenFrame();
+  if (!image) return "I couldn't grab your screen just then. Try sharing it again.";
+  try {
+    const res = await fetch(`${BRAIN}/see`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ image }),
+    });
+    if (res.status === 503) return "My eyes aren't switched on yet. My vision needs a key added in settings.";
+    if (!res.ok) return "I looked but couldn't quite make it out just then.";
+    const { text } = await res.json();
+    return text || "I looked but couldn't tell what's there.";
+  } catch { return "I couldn't reach my vision just then."; }
+}
+
 /* ---------- Share screen ---------- */
 async function toggleScreen() {
   if (screenStream) {
@@ -196,9 +241,8 @@ async function toggleScreen() {
   try {
     screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
     screenBtn.textContent = "Stop sharing";
-    // Pulse's fast LLM can't see pixels; this tells it the user is now pointing
-    // at something so it prompts them to open the form and ask for a fill.
-    client?.sendUserMessage?.("[The user just shared their screen. Ask what form they want filled, then call fill_form.]");
+    // Nudge Pulse to actually look at the freshly shared screen.
+    client?.sendUserMessage?.("[The user just shared their screen. Call look_at_screen now, then tell them what you see.]");
     screenStream.getVideoTracks()[0].addEventListener("ended", () => {
       screenStream = null; screenBtn.textContent = "Share screen";
     });
@@ -253,7 +297,14 @@ async function start() {
           catch (e) { console.error("[pulse] fill_form", e); return "Something went wrong filling that in."; }
         },
       });
-    } catch (e) { console.warn("[pulse] could not register fill_form", e); }
+      client.registerToolCallHandler?.("look_at_screen", {
+        onStart: async () => {
+          console.log("[pulse] look_at_screen invoked by the avatar");
+          try { return await lookAtScreen(); }
+          catch (e) { console.error("[pulse] look_at_screen", e); return "I had trouble looking at your screen just then."; }
+        },
+      });
+    } catch (e) { console.warn("[pulse] could not register tools", e); }
 
     client.addListener(AnamEvent.SESSION_READY, () => {
       setStatus("Connected. Just talk to Pulse.");

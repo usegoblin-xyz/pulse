@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { planFill } from "./planner.js";
 import { makeOpenAIModel, modelConfigFromEnv } from "./model.js";
 import { mintSessionToken, anamConfigFromEnv } from "./anam.js";
+import { describeScreen, visionConfigFromEnv } from "./vision.js";
 import type { FormField, Profile } from "./types.js";
 
 const PORT = Number(process.env.PORT || 8787);
@@ -61,19 +62,21 @@ function allowOrigin(origin?: string): string | null {
   return WEB_ORIGINS.includes(origin) ? origin : null;
 }
 
-function readBody(req: http.IncomingMessage): Promise<string> {
+function readBody(req: http.IncomingMessage, max = MAX_BODY): Promise<string> {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => {
       size += c.length;
-      if (size > MAX_BODY) reject(new Error("payload too large"));
+      if (size > max) reject(new Error("payload too large"));
       else chunks.push(c);
     });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
 }
+
+const vision = visionConfigFromEnv();
 
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -150,6 +153,28 @@ const server = http.createServer(async (req, res) => {
     } catch (e: any) {
       console.error("[session-token]", e?.message ?? e);
       res.writeHead(502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not start session" }));
+    }
+    return;
+  }
+
+  // --- vision: describe the user's shared screen ---
+  if (req.method === "POST" && req.url === "/see") {
+    if (!vision.apiKey) {
+      res.writeHead(503, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "vision not configured" }));
+      return;
+    }
+    try {
+      const body = JSON.parse((await readBody(req, 8 * 1024 * 1024)) || "{}"); // screenshots are big
+      const image = String(body.image || "");
+      if (!image.startsWith("data:image/")) {
+        res.writeHead(400, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "image required" }));
+        return;
+      }
+      const text = await describeScreen(image, body.question ? String(body.question) : undefined, vision);
+      res.writeHead(200, { "content-type": "application/json", ...cors }).end(JSON.stringify({ text }));
+    } catch (e: any) {
+      console.error("[see]", e?.message ?? e);
+      res.writeHead(502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not read the screen" }));
     }
     return;
   }

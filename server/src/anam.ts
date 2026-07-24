@@ -58,6 +58,17 @@ export const FILL_FORM_TOOL = {
   awaitResult: true,
 } as const;
 
+// Lets Pulse actually look at the shared screen (a vision model reads a
+// screenshot). Handler is registered client-side in pulse.js.
+export const LOOK_AT_SCREEN_TOOL = {
+  type: "client",
+  name: "look_at_screen",
+  description:
+    "Look at the user's shared screen and describe what is on it. Call this the moment the user shares their screen, asks what you see or what is on their screen, or before filling a form you have not looked at yet. Returns a plain description of the screen, including any form's heading and the fields it asks for.",
+  parameters: { type: "object", properties: {}, required: [] },
+  awaitResult: true,
+} as const;
+
 /** Pure: the personaConfig we send to Anam. Split out so it's unit-testable. */
 export function buildPersonaConfig(cfg: AnamConfig): Record<string, unknown> {
   if (cfg.personaId) return { personaId: cfg.personaId };
@@ -68,7 +79,7 @@ export function buildPersonaConfig(cfg: AnamConfig): Record<string, unknown> {
     llmId: cfg.llmId,
     avatarModel: cfg.avatarModel,
     systemPrompt: cfg.systemPrompt,
-    tools: [FILL_FORM_TOOL],
+    tools: [FILL_FORM_TOOL, LOOK_AT_SCREEN_TOOL],
   };
 }
 
