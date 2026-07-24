@@ -62,6 +62,19 @@ function scan(): FormField[] {
   return out;
 }
 
+// React/Vue attach their own value setter to inputs and ignore a plain
+// `el.value = x` (their internal state overwrites it). Going through the native
+// prototype setter bypasses that so the framework registers the change.
+type Fillable = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+function setNativeValue(el: Fillable, value: string) {
+  const proto = Object.getPrototypeOf(el);
+  const protoSet = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+  const ownSet = Object.getOwnPropertyDescriptor(el, "value")?.set;
+  if (protoSet && ownSet !== protoSet) protoSet.call(el, value);
+  else if (ownSet) ownSet.call(el, value);
+  else (el as unknown as { value: string }).value = value;
+}
+
 // Apply values ONLY. No submission, ever. Sensitive fields are refused here too.
 function apply(fills: FillItem[]): { applied: number; refused: number } {
   let applied = 0;
@@ -74,16 +87,15 @@ function apply(fills: FillItem[]): { applied: number; refused: number } {
     const label = labelFor(el);
     if (isSensitive({ name, label, type })) { refused++; continue; } // never auto-type a secret
 
-    if (el instanceof HTMLSelectElement) {
-      if (!Array.from(el.options).some((o) => o.value === value)) continue;
-      el.value = value;
-    } else if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-      el.value = value;
-    } else {
-      continue;
-    }
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) continue;
+    if (el instanceof HTMLSelectElement && !Array.from(el.options).some((o) => o.value === value)) continue;
+
+    el.focus(); // some fields only accept input while focused
+    setNativeValue(el, value);
+    // The events frameworks and validators listen for.
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
+    el.blur(); // triggers "field touched" validation / onBlur handlers
     applied++;
   }
   return { applied, refused };

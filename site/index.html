@@ -95,6 +95,35 @@
 
       .offstage{position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden}
 
+      /* ---- "Add Pulse to Chrome" prompt (shown when the extension is missing) ---- */
+      #install-prompt{
+        position:fixed;inset:0;z-index:10;display:none;
+        align-items:center;justify-content:center;
+        background:rgba(5,5,5,.72);backdrop-filter:blur(6px);
+      }
+      #install-prompt.show{display:flex}
+      .ip-card{
+        background:#0d0d0d;border:1px solid rgba(255,255,255,.14);border-radius:18px;
+        padding:26px 28px;max-width:340px;text-align:center;
+        box-shadow:0 30px 80px rgba(0,0,0,.6);
+      }
+      .ip-title{font-family:'Gulax',system-ui,sans-serif;font-size:22px;margin-bottom:10px;color:#fff}
+      .ip-body{font-size:13.5px;line-height:1.6;color:rgba(255,255,255,.7);margin-bottom:18px}
+      .ip-add{
+        display:inline-block;width:100%;box-sizing:border-box;
+        background:#fff;color:#111;font-weight:600;font-size:14px;
+        border:none;border-radius:999px;padding:12px 22px;cursor:pointer;text-decoration:none;
+      }
+      .ip-dismiss{
+        display:block;width:100%;margin-top:10px;background:transparent;
+        color:rgba(255,255,255,.5);border:none;font-size:12.5px;cursor:pointer;padding:6px;
+      }
+      .ip-note{
+        font-size:11.5px;line-height:1.6;color:rgba(255,255,255,.5);
+        margin-top:14px;text-align:left;display:none;white-space:pre-line;
+      }
+      .ip-note.show{display:block}
+
       @media (max-width:980px){
         body{overflow:auto}
         .hero{height:auto;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding-bottom:40px}
@@ -110,7 +139,7 @@
       <video id="persona-video" autoplay playsinline></video>
       <!-- the living portrait: seamless 20s palindrome loop.
            Relative path keeps this folder portable; swap to a CDN URL once Pulse has a home. -->
-      <video id="poster" src="pulse-beam-loop.mp4" autoplay muted loop playsinline></video>
+      <video id="poster" src="pulse-beam-loop.mp4" poster="pulse-poster.jpg" preload="auto" autoplay muted loop playsinline></video>
 
       <div id="action-banner"></div>
 
@@ -131,18 +160,26 @@
       </aside>
     </main>
 
-    <!-- wiring targets for when Pulse gets its own brain/avatar stack; not part of this page's look -->
+    <!-- No file box: Pulse is computer-use (fills forms in place), not a
+         document generator. Chat history stays offstage for future wiring. -->
     <div class="offstage">
       <div id="chat-history"></div>
-      <div id="draft-panel">
-        <span id="draft-title"></span>
-        <span id="draft-status"></span>
-        <iframe id="draft-frame"></iframe>
-        <pre id="draft-text"></pre>
+    </div>
+
+    <!-- Shown when Pulse is asked to fill a form but his browser helper (the
+         extension, his "hands") isn't installed yet. -->
+    <div id="install-prompt" role="dialog" aria-label="Add Pulse to Chrome">
+      <div class="ip-card">
+        <div class="ip-title">Add Pulse to Chrome</div>
+        <p class="ip-body">To fill forms for you, I need my browser helper. One click to add it. It only ever acts when you ask, keeps your details on your device, and never submits.</p>
+        <a id="ip-add" class="ip-add" href="#" rel="noopener">Add to Chrome</a>
+        <button id="ip-dismiss" class="ip-dismiss">Not now</button>
+        <div id="ip-note" class="ip-note"></div>
       </div>
     </div>
 
-    <!-- No auth or app script yet: Pulse is hosted separately from Kara.
-         When wiring it up, this is where Clerk (or its own auth) and its script.js go. -->
+    <!-- Wires "Start conversation" to a live Anam avatar session via the brain
+         (server/), and connects the avatar to the form-filler (fill_form tool). -->
+    <script type="module" src="pulse.js?v=9"></script>
   </body>
 </html>

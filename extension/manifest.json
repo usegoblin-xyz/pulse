@@ -1,13 +1,20 @@
 {
   "manifest_version": 3,
   "name": "Pulse",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Fills web forms from your own saved details. Reads the page, fills what it can, and never submits for you.",
-  "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["http://localhost:8787/*"],
+  "permissions": ["scripting", "storage", "tabs"],
+  "host_permissions": ["http://*/*", "https://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": {
     "default_title": "Pulse — fill this form",
     "default_popup": "popup.html"
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://pulse-demo.fly.dev/*", "http://localhost:8787/*"],
+      "js": ["relay.js"],
+      "run_at": "document_start"
+    }
+  ]
 }
