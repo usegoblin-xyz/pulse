@@ -242,11 +242,13 @@ async function start() {
 
   try {
     client = createClient(sessionToken);
+    window.__pulseClient = client; // test/debug hook
 
     // Register the fill_form handler BEFORE streaming, or an early tool call is missed.
     try {
       client.registerToolCallHandler?.("fill_form", {
         onStart: async () => {
+          console.log("[pulse] fill_form invoked by the avatar");
           try { return await fillForm(); }
           catch (e) { console.error("[pulse] fill_form", e); return "Something went wrong filling that in."; }
         },
