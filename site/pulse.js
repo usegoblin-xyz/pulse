@@ -38,7 +38,7 @@ const pending = new Map();
 window.addEventListener("message", (ev) => {
   if (ev.source !== window || ev.data?.source !== EXT) return;
   const { cmd, id, result } = ev.data;
-  if (cmd === "ready" || cmd === "pong") extPresent = true;
+  if (cmd === "ready" || cmd === "pong") { extPresent = true; hideInstall(); } // helper arrived
   if (cmd === "fill-result" && pending.has(id)) { pending.get(id)(result); pending.delete(id); }
 });
 
@@ -54,6 +54,33 @@ function extCall(cmd, extra = {}, timeoutMs = 20000) {
 
 // Detect the extension shortly after load (it also announces itself via "ready").
 extCall("ping", {}, 600).then((r) => { if (r) extPresent = true; });
+
+/* ---------- "Add Pulse to Chrome" prompt ---------- */
+// Set window.PULSE_EXTENSION_URL to the Chrome Web Store listing once published.
+const EXTENSION_URL = window.PULSE_EXTENSION_URL || "";
+const installPrompt = document.getElementById("install-prompt");
+const ipAdd = document.getElementById("ip-add");
+const ipDismiss = document.getElementById("ip-dismiss");
+const ipNote = document.getElementById("ip-note");
+
+function showInstall() { installPrompt?.classList.add("show"); }
+function hideInstall() { installPrompt?.classList.remove("show"); }
+
+ipAdd?.addEventListener("click", (e) => {
+  e.preventDefault();
+  if (EXTENSION_URL) {
+    window.open(EXTENSION_URL, "_blank", "noopener");
+  } else {
+    // Not on the Web Store yet — show the developer load steps.
+    ipNote.textContent =
+      "Not on the Chrome Web Store yet. For now: open chrome://extensions, turn on Developer mode, click Load unpacked, and choose the pulse extension/dist folder.";
+    ipNote.classList.add("show");
+  }
+  // After they add it, the page needs a reload for the helper to attach.
+  ipAdd.textContent = "I've added it — refresh";
+  ipAdd.onclick = () => location.reload();
+});
+ipDismiss?.addEventListener("click", hideInstall);
 
 function setStatus(text) {
   if (status) { status.textContent = text; status.style.display = "block"; }
@@ -123,9 +150,15 @@ async function fillForm() {
     return `Filled ${r.applied || 0} field${r.applied === 1 ? "" : "s"} on the page. I did not submit anything.${asks ? ` ${asks} still need you, including anything sensitive like a password.` : ""}`;
   }
 
-  // Fallback: no extension — fill a form on THIS page if there is one.
+  // No helper installed — put up the "Add Pulse to Chrome" prompt.
+  showInstall();
+  return "To fill that in for you I need my browser helper. I've put an Add to Chrome button on your screen. Add it, refresh, and I'll take care of the rest.";
+}
+
+// Kept for when a form lives on the Pulse page itself (e.g. a demo form).
+async function fillSamePage() {
   const fields = scanForm();
-  if (!fields.length) return "There's no form on this screen, and I don't see the Pulse browser helper. Open the page with the form, or load the extension so I can reach it.";
+  if (!fields.length) return "There's no form on this screen.";
   let profile = {};
   try { profile = JSON.parse(localStorage.getItem("pulse.profile") || "{}"); } catch {}
   if (!Object.keys(profile).length) return "I don't have your details saved yet. Tell me your name and I'll start there.";

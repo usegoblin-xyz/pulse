@@ -63,6 +63,17 @@ async function fillActiveTab() {
   return fillTab(tab.id);
 }
 
+// On install, inject the relay into any already-open Pulse tabs so the page
+// detects the helper immediately — the user doesn't have to refresh.
+chrome.runtime.onInstalled.addListener(async () => {
+  const tabs = await chrome.tabs.query({
+    url: ["https://pulse-demo.fly.dev/*", "http://localhost:8787/*"],
+  });
+  for (const t of tabs) {
+    if (t.id) chrome.scripting.executeScript({ target: { tabId: t.id }, files: ["relay.js"] }).catch(() => {});
+  }
+});
+
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   // From the popup: fill the tab the user is on.
   if (msg?.type === "fillActiveTab") {
