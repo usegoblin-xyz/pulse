@@ -265,10 +265,15 @@ async function start() {
     await client.streamToVideoElement("persona-video");
   } catch (err) {
     console.error("[pulse] stream failed:", err);
-    const denied = String(err?.name || err?.message || "").match(/permission|denied|NotAllowed/i);
-    setStatus(denied
-      ? "Pulse needs your microphone. Allow it in the address bar, then press Start."
-      : "Couldn't start the video. Check mic access and press Start again.");
+    const n = String(err?.name || err?.message || "");
+    let msg = "Couldn't start Pulse. Refresh the page and press Start again.";
+    if (/NotAllowed|permission|denied/i.test(n))
+      msg = "Pulse needs your microphone. Click the mic icon in the address bar, allow it, then press Start.";
+    else if (/NotReadable|in ?use|busy|already/i.test(n))
+      msg = "Your microphone is busy. Close other apps or Pulse tabs using it (Zoom, Meet, another tab), then press Start.";
+    else if (/NotFound|no.*device|Requested device/i.test(n))
+      msg = "No microphone found. Check your input device, then press Start.";
+    setStatus(msg);
     startBtn.disabled = false;
   }
 }
