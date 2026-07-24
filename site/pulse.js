@@ -121,6 +121,14 @@ function scanForm() {
   }
   return out;
 }
+// Bypass React/Vue's value tracker (a plain el.value = x gets discarded).
+function setNativeValue(el, value) {
+  const protoSet = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value")?.set;
+  const ownSet = Object.getOwnPropertyDescriptor(el, "value")?.set;
+  if (protoSet && ownSet !== protoSet) protoSet.call(el, value);
+  else if (ownSet) ownSet.call(el, value);
+  else el.value = value;
+}
 function applyFills(fills) {
   let applied = 0;
   for (const { fieldId, value } of fills) {
@@ -129,9 +137,11 @@ function applyFills(fills) {
     const type = (el.getAttribute("type") || el.tagName).toLowerCase();
     if (sensitive({ name: el.getAttribute("name"), label: labelFor(el), type })) continue; // never type a secret
     if (el.tagName === "SELECT" && !Array.from(el.options).some((o) => o.value === value)) continue;
-    el.value = value;
+    el.focus();
+    setNativeValue(el, value);
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
+    el.blur();
     applied++;
   }
   return applied; // NOTE: never .submit() — filling only.
