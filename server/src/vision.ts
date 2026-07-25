@@ -68,7 +68,9 @@ export async function planAction(
     headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },
     body: JSON.stringify({
       model: cfg.model,
-      max_tokens: 300,
+      // Reasoning VLMs (GLM-4.5V) spend most tokens on hidden reasoning before
+      // the JSON answer, so keep the budget generous or the answer gets cut off.
+      max_tokens: 1500,
       temperature: 0,
       messages: [
         { role: "user", content: [
