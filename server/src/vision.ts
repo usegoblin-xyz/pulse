@@ -37,7 +37,8 @@ Rules:
 - For an autocomplete field (city, address), type the value, then on the NEXT turn click the matching option that appeared in the screenshot.
 - NEVER click a submit, create, sign up, continue, pay, or next button. Only fill fields.
 - Do not repeat an action already in the history. If a field is already filled correctly, move on.
-- When nothing else can be filled, return done.`;
+- BE THOROUGH. Work through EVERY element in the list. If an element's value is empty and the user's details contain anything that fits it (name, email, phone, company, job title, street address, city, state, zip, country, website, and so on), fill it. Do not skip a field just because it is lower on the page.
+- Only return done once every field you have a value for is already filled. If any field in the list is still empty and you have a matching detail, do NOT return done — fill that field instead.`;
 
 export interface AgentContext {
   elements: Array<{ n: number; tag: string; type?: string; label?: string; value?: string }>;
