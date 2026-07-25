@@ -83,7 +83,9 @@ ipAdd?.addEventListener("click", (e) => {
 ipDismiss?.addEventListener("click", hideInstall);
 
 function setStatus(text) {
-  if (status) { status.textContent = text; status.style.display = "block"; }
+  if (!status) return;
+  status.textContent = text || "";
+  status.style.display = text ? "block" : "none"; // hidden when there's nothing to say
 }
 function enable(btn, on) {
   if (!btn) return;
@@ -187,32 +189,25 @@ async function fillSamePage() {
 }
 
 /* ---------- vision: look at the shared screen ---------- */
+// A hidden <video> bound to the shared-screen stream, kept playing so a frame is
+// always ready to grab. Far more reliable than ImageCapture on display tracks.
+let screenVideo = null;
+
 async function captureScreenFrame() {
-  const track = screenStream?.getVideoTracks?.()[0];
-  if (!track) return null;
+  if (!screenVideo || !screenVideo.videoWidth) {
+    console.warn("[pulse] no screen frame available (videoWidth=", screenVideo?.videoWidth, ")");
+    return null;
+  }
   try {
-    const bitmap = await new ImageCapture(track).grabFrame();
-    const scale = Math.min(1, 1280 / bitmap.width);
+    const scale = Math.min(1, 1280 / screenVideo.videoWidth);
     const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bitmap.width * scale);
-    canvas.height = Math.round(bitmap.height * scale);
-    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    canvas.width = Math.round(screenVideo.videoWidth * scale);
+    canvas.height = Math.round(screenVideo.videoHeight * scale);
+    canvas.getContext("2d").drawImage(screenVideo, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL("image/jpeg", 0.6);
-  } catch {
-    // Fallback: draw a video element playing the stream.
-    return await new Promise((resolve) => {
-      const v = document.createElement("video");
-      v.srcObject = screenStream; v.muted = true;
-      v.onloadedmetadata = () => { v.play(); setTimeout(() => {
-        const scale = Math.min(1, 1280 / v.videoWidth);
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.round(v.videoWidth * scale);
-        canvas.height = Math.round(v.videoHeight * scale);
-        canvas.getContext("2d").drawImage(v, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", 0.6));
-      }, 200); };
-      v.onerror = () => resolve(null);
-    });
+  } catch (e) {
+    console.error("[pulse] captureScreenFrame failed", e);
+    return null;
   }
 }
 
@@ -232,20 +227,28 @@ async function lookAtScreen() {
 }
 
 /* ---------- Share screen ---------- */
+function stopScreen() {
+  screenStream?.getTracks().forEach((t) => t.stop());
+  screenStream = null;
+  if (screenVideo) { screenVideo.srcObject = null; screenVideo.remove(); screenVideo = null; }
+  if (screenBtn) screenBtn.textContent = "Share screen";
+}
+
 async function toggleScreen() {
-  if (screenStream) {
-    screenStream.getTracks().forEach((t) => t.stop());
-    screenStream = null; screenBtn.textContent = "Share screen";
-    return;
-  }
+  if (screenStream) { stopScreen(); return; }
   try {
-    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 4 } });
     screenBtn.textContent = "Stop sharing";
-    // Nudge Pulse to actually look at the freshly shared screen.
+    // Keep a hidden video playing the stream so a frame is always grabbable.
+    screenVideo = document.createElement("video");
+    screenVideo.srcObject = screenStream;
+    screenVideo.muted = true; screenVideo.playsInline = true;
+    screenVideo.style.cssText = "position:fixed;left:-9999px;width:1px;height:1px";
+    document.body.appendChild(screenVideo);
+    await screenVideo.play().catch(() => {});
+    // Nudge Pulse to look at the freshly shared screen.
     client?.sendUserMessage?.("[The user just shared their screen. Call look_at_screen now, then tell them what you see.]");
-    screenStream.getVideoTracks()[0].addEventListener("ended", () => {
-      screenStream = null; screenBtn.textContent = "Share screen";
-    });
+    screenStream.getVideoTracks()[0].addEventListener("ended", stopScreen);
   } catch { setStatus("Screen share was cancelled."); }
 }
 
@@ -258,8 +261,10 @@ async function toggleCompanion() {
   if (companionWin && !companionWin.closed) { companionWin.close(); return; }
   companionWin = await window.documentPictureInPicture.requestWindow({ width: 300, height: 380 });
   const d = companionWin.document;
-  d.body.style.cssText = "margin:0;background:#050505;overflow:hidden";
-  videoEl.style.cssText = "width:100%;height:100%;object-fit:cover";
+  d.documentElement.style.cssText = "height:100%";
+  d.body.style.cssText = "margin:0;height:100%;background:#050505;overflow:hidden";
+  // position:fixed + inset:0 fills the whole PiP window, so no black gap below.
+  videoEl.style.cssText = "position:fixed;inset:0;width:100%;height:100%;object-fit:cover";
   d.body.append(videoEl); // the live WebRTC stream keeps playing as it moves
   companionWin.addEventListener("pagehide", () => {
     videoEl.style.cssText = "";
@@ -331,13 +336,12 @@ async function start() {
 
 function stop() {
   if (companionWin && !companionWin.closed) companionWin.close();
-  if (screenStream) { screenStream.getTracks().forEach((t) => t.stop()); screenStream = null; }
-  if (screenBtn) screenBtn.textContent = "Share screen";
+  stopScreen();
   if (client) { client.stopStreaming(); client = null; }
   if (poster) poster.style.opacity = "1";
   enable(stopBtn, false); enable(screenBtn, false); enable(pipBtn, false);
   startBtn.disabled = false;
-  setStatus("Ready when you are");
+  setStatus("");
 }
 
 startBtn?.addEventListener("click", start);
