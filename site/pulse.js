@@ -337,7 +337,7 @@ async function start() {
     } catch (e) { console.warn("[pulse] could not register tools", e); }
 
     client.addListener(AnamEvent.SESSION_READY, () => {
-      setStatus("Connected. Talk to Pulse, or type below.");
+      setStatus(""); // stay clean on connect — the live avatar + text box are signal enough
       enable(stopBtn, true); enable(screenBtn, true); enable(pipBtn, true);
       if (sayForm) sayForm.style.display = "block";
       if (poster) poster.style.opacity = "0";
