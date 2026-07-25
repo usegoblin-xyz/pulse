@@ -6,6 +6,13 @@ primary_region = "iad"
 [build]
   dockerfile = "Dockerfile"
 
+[env]
+  # Pulse's vision runs through Hugging Face's OpenAI-compatible router.
+  # Swap PULSE_VISION_MODEL to any served VLM (e.g. Qwen/Qwen2.5-VL-32B-Instruct).
+  # The HF token itself is set as the secret PULSE_VISION_API_KEY.
+  PULSE_VISION_BASE_URL = "https://router.huggingface.co/v1"
+  PULSE_VISION_MODEL = "zai-org/GLM-4.5V"
+
 [http_service]
   internal_port = 8080
   force_https = true
