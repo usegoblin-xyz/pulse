@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { planFill } from "./planner.js";
 import { makeOpenAIModel, modelConfigFromEnv } from "./model.js";
 import { mintSessionToken, anamConfigFromEnv } from "./anam.js";
-import { describeScreen, visionConfigFromEnv } from "./vision.js";
+import { describeScreen, planAction, visionConfigFromEnv } from "./vision.js";
 import type { FormField, Profile } from "./types.js";
 
 const PORT = Number(process.env.PORT || 8787);
@@ -175,6 +175,32 @@ const server = http.createServer(async (req, res) => {
     } catch (e: any) {
       console.error("[see]", e?.message ?? e);
       res.writeHead(502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not read the screen" }));
+    }
+    return;
+  }
+
+  // --- computer-use: pick the next action from a marked screenshot ---
+  if (req.method === "POST" && req.url === "/agent-step") {
+    if (!vision.apiKey) {
+      res.writeHead(503, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "vision not configured" }));
+      return;
+    }
+    try {
+      const body = JSON.parse((await readBody(req, 8 * 1024 * 1024)) || "{}");
+      const screenshot = String(body.screenshot || "");
+      if (!screenshot.startsWith("data:image/")) {
+        res.writeHead(400, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "screenshot required" }));
+        return;
+      }
+      const action = await planAction(screenshot, {
+        elements: Array.isArray(body.elements) ? body.elements.slice(0, 200) : [],
+        profile: body.profile && typeof body.profile === "object" ? body.profile : {},
+        history: Array.isArray(body.history) ? body.history.slice(-20) : [],
+      }, vision);
+      res.writeHead(200, { "content-type": "application/json", ...cors }).end(JSON.stringify({ action }));
+    } catch (e: any) {
+      console.error("[agent-step]", e?.message ?? e);
+      res.writeHead(502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not plan the next step" }));
     }
     return;
   }
