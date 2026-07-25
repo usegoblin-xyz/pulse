@@ -68,6 +68,33 @@ export const LOOK_AT_SCREEN_TOOL = {
   awaitResult: true,
 } as const;
 
+// Memory: Pulse collects the user's common form details conversationally and
+// keeps them on the user's own device (localStorage on the page). Summoned on
+// demand to help fill forms — no extension, no install. Handlers in pulse.js.
+export const SAVE_DETAILS_TOOL = {
+  type: "client",
+  name: "save_details",
+  description:
+    "Remember details the user gives you (name, email, phone, address, company, job title, etc.) so you can help them fill forms later. Call this whenever the user tells you a detail worth keeping. Never save a password, card number, or other secret. Pass the details as key/value pairs.",
+  parameters: {
+    type: "object",
+    properties: {
+      details: { type: "object", description: 'e.g. {"fullName":"Ada Lovelace","email":"ada@x.com","city":"London"}' },
+    },
+    required: ["details"],
+  },
+  awaitResult: true,
+} as const;
+
+export const RECALL_DETAILS_TOOL = {
+  type: "client",
+  name: "recall_details",
+  description:
+    "Get the details you have saved for this user, so you can tell them what goes in each form field. Returns the saved key/value pairs (or nothing if this is a first visit).",
+  parameters: { type: "object", properties: {}, required: [] },
+  awaitResult: true,
+} as const;
+
 /** Pure: the personaConfig we send to Anam. Split out so it's unit-testable. */
 export function buildPersonaConfig(cfg: AnamConfig): Record<string, unknown> {
   if (cfg.personaId) return { personaId: cfg.personaId };
@@ -78,7 +105,7 @@ export function buildPersonaConfig(cfg: AnamConfig): Record<string, unknown> {
     llmId: cfg.llmId,
     avatarModel: cfg.avatarModel,
     systemPrompt: cfg.systemPrompt,
-    tools: [FILL_FORM_TOOL, LOOK_AT_SCREEN_TOOL],
+    tools: [FILL_FORM_TOOL, LOOK_AT_SCREEN_TOOL, SAVE_DETAILS_TOOL, RECALL_DETAILS_TOOL],
   };
 }
 

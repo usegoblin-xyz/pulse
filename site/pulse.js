@@ -11,7 +11,17 @@ import { createClient } from "https://esm.sh/@anam-ai/js-sdk@latest";
 import { AnamEvent } from "https://esm.sh/@anam-ai/js-sdk@latest/dist/module/types";
 
 const BRAIN = (window.PULSE_BRAIN_URL || "").replace(/\/$/, "");
-const GREETING = "I'm Pulse. Point me at whatever's giving you trouble and I'll handle the boring parts.";
+
+// The user's saved form details, kept on THIS device (no server, no extension).
+// Pulse collects them conversationally and recalls them to help fill forms.
+function getPageProfile() {
+  try { return JSON.parse(localStorage.getItem("pulse.profile") || "{}"); } catch { return {}; }
+}
+function mergePageProfile(obj) {
+  const merged = { ...getPageProfile(), ...(obj && typeof obj === "object" ? obj : {}) };
+  localStorage.setItem("pulse.profile", JSON.stringify(merged));
+  return merged;
+}
 
 const startBtn = document.getElementById("start-button");
 const stopBtn = document.getElementById("stop-button");
@@ -164,9 +174,8 @@ async function fillForm() {
     return `Filled ${r.applied || 0} field${r.applied === 1 ? "" : "s"} on the page. I did not submit anything.${asks ? ` ${asks} still need you, including anything sensitive like a password.` : ""}`;
   }
 
-  // No helper installed — put up the "Add Pulse to Chrome" prompt.
-  showInstall();
-  return "To fill that in for you I need my browser helper. I've put an Add to Chrome button on your screen. Add it, refresh, and I'll take care of the rest.";
+  // No helper — guide instead of nagging to install (the low-friction path).
+  return "I can't type into that page myself without the browser helper, but I don't need it. Let me look at the form and walk you through it, field by field.";
 }
 
 // Kept for when a form lives on the Pulse page itself (e.g. a demo form).
@@ -311,6 +320,20 @@ async function start() {
           catch (e) { console.error("[pulse] look_at_screen", e); return "I had trouble looking at your screen just then."; }
         },
       });
+      client.registerToolCallHandler?.("save_details", {
+        onStart: async (p) => {
+          const d = p?.arguments?.details ?? p?.arguments ?? {};
+          const merged = mergePageProfile(d);
+          console.log("[pulse] save_details", Object.keys(d || {}));
+          return `Saved to your device. I now remember: ${Object.keys(merged).join(", ") || "nothing yet"}.`;
+        },
+      });
+      client.registerToolCallHandler?.("recall_details", {
+        onStart: async () => {
+          const prof = getPageProfile();
+          return Object.keys(prof).length ? JSON.stringify(prof) : "Nothing saved yet, this is a first visit.";
+        },
+      });
     } catch (e) { console.warn("[pulse] could not register tools", e); }
 
     client.addListener(AnamEvent.SESSION_READY, () => {
@@ -318,7 +341,10 @@ async function start() {
       enable(stopBtn, true); enable(screenBtn, true); enable(pipBtn, true);
       if (sayForm) sayForm.style.display = "block";
       if (poster) poster.style.opacity = "0";
-      client.talk(GREETING);
+      const known = Object.keys(getPageProfile()).length > 0;
+      client.talk(known
+        ? "Welcome back. Share your screen and point me at any form, and I'll tell you exactly what goes where."
+        : "Hey, I'm Pulse. First time? Tell me your name and the details you fill in a lot, and I'll remember them so I can help you fly through forms next time.");
     });
     client.addListener(AnamEvent.CONNECTION_CLOSED, stop);
     await client.streamToVideoElement("persona-video");
