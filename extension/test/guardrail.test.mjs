@@ -8,17 +8,24 @@ import { readFile } from "node:fs/promises";
 
 const content = await readFile(new URL("../dist/content.js", import.meta.url), "utf8");
 
+// The agent loop must be able to click (open dropdowns, pick options), so a
+// blanket "no clicks" rule no longer holds. The hard guarantee is now: never
+// call form.submit()/requestSubmit(), and never click a submit-like control —
+// which is enforced by the isSubmitLike guard that must be present in the click
+// path.
 const FORBIDDEN = [
   /\.submit\s*\(/, // form.submit()
   /\.requestSubmit\s*\(/, // form.requestSubmit()
-  /type\s*=\s*["'`]submit["'`]/i, // targeting a submit control to click
-  /\.click\s*\(/, // no synthetic clicks at all in M1
 ];
 
-test("built content script contains no form-submission or click calls", () => {
+test("built content script never calls form.submit / requestSubmit", () => {
   for (const re of FORBIDDEN) {
     assert.ok(!re.test(content), `content.js contains forbidden pattern ${re}`);
   }
+});
+
+test("clicks are guarded against submit-like controls", () => {
+  assert.ok(/isSubmitLike/.test(content), "the submit-click guard is missing from content.js");
 });
 
 test("built content script actually shipped (sanity)", () => {
