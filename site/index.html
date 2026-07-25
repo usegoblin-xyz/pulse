@@ -124,6 +124,17 @@
       }
       .ip-note.show{display:block}
 
+      /* ---- type-to-Pulse box (works even if the mic doesn't) ---- */
+      #say-form{display:none;margin-top:12px}
+      #say-input{
+        width:100%;box-sizing:border-box;
+        background:rgba(255,255,255,.08);color:#fff;
+        border:1.5px solid rgba(255,255,255,.28);border-radius:999px;
+        padding:11px 18px;font:inherit;font-size:14px;backdrop-filter:blur(6px);
+      }
+      #say-input::placeholder{color:rgba(255,255,255,.5)}
+      #say-input:focus{outline:none;border-color:rgba(255,255,255,.5)}
+
       @media (max-width:980px){
         body{overflow:auto}
         .hero{height:auto;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding-bottom:40px}
@@ -157,6 +168,9 @@
           <button id="pip-button" disabled style="opacity:.55">Companion Mode</button>
           <button id="stop-button" disabled style="opacity:.55">Stop</button>
         </div>
+        <form id="say-form" autocomplete="off">
+          <input id="say-input" type="text" placeholder="or type to Pulse…" />
+        </form>
       </aside>
     </main>
 
@@ -180,6 +194,6 @@
 
     <!-- Wires "Start conversation" to a live Anam avatar session via the brain
          (server/), and connects the avatar to the form-filler (fill_form tool). -->
-    <script type="module" src="pulse.js?v=10"></script>
+    <script type="module" src="pulse.js?v=11"></script>
   </body>
 </html>

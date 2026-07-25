@@ -20,6 +20,8 @@ const pipBtn = document.getElementById("pip-button");
 const status = document.getElementById("status");
 const poster = document.getElementById("poster");
 const videoEl = document.getElementById("persona-video");
+const sayForm = document.getElementById("say-form");
+const sayInput = document.getElementById("say-input");
 
 let client = null;
 let screenStream = null;
@@ -312,8 +314,9 @@ async function start() {
     } catch (e) { console.warn("[pulse] could not register tools", e); }
 
     client.addListener(AnamEvent.SESSION_READY, () => {
-      setStatus("Connected. Just talk to Pulse.");
+      setStatus("Connected. Talk to Pulse, or type below.");
       enable(stopBtn, true); enable(screenBtn, true); enable(pipBtn, true);
+      if (sayForm) sayForm.style.display = "block";
       if (poster) poster.style.opacity = "0";
       client.talk(GREETING);
     });
@@ -337,6 +340,7 @@ async function start() {
 function stop() {
   if (companionWin && !companionWin.closed) companionWin.close();
   stopScreen();
+  if (sayForm) sayForm.style.display = "none";
   if (client) { client.stopStreaming(); client = null; }
   if (poster) poster.style.opacity = "1";
   enable(stopBtn, false); enable(screenBtn, false); enable(pipBtn, false);
@@ -348,3 +352,8 @@ startBtn?.addEventListener("click", start);
 stopBtn?.addEventListener("click", stop);
 screenBtn?.addEventListener("click", toggleScreen);
 pipBtn?.addEventListener("click", toggleCompanion);
+sayForm?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const t = sayInput.value.trim();
+  if (t && client) { client.sendUserMessage?.(t); sayInput.value = ""; }
+});
