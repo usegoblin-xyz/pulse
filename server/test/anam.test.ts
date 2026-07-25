@@ -8,7 +8,7 @@ test("default persona config is Pulse: given avatar, a real voice, the prompt", 
   const pc = buildPersonaConfig(cfg) as Record<string, string>;
   assert.equal(pc.name, "Pulse");
   assert.equal(pc.avatarId, "a2f0f964-6d5d-4bd9-81fe-973ef6a6215b");
-  assert.equal(pc.voiceId, "8e67ed57-4fc0-11f1-84b0-52bacf74fa75"); // Laurent
+  assert.equal(pc.voiceId, "96005cba-c7d6-494f-9de9-7cea4d1322b6"); // custom Pulse voice
   assert.equal(pc.systemPrompt, PULSE_SYSTEM_PROMPT);
   assert.ok(!("personaId" in pc));
 });

@@ -31,10 +31,9 @@ export function anamConfigFromEnv(env = process.env): AnamConfig {
     // a3f92a18… did not exist in the account; this is the real one.) Override
     // with PULSE_AVATAR_ID.
     avatarId: env.PULSE_AVATAR_ID || "a2f0f964-6d5d-4bd9-81fe-973ef6a6215b",
-    // Laurent — "Dependable Anchor", strong and steady, fits Pulse's calm edge.
-    // Other male voices in the account: Archie 91b4ce0f-…, Corey 91a47e5a-…,
-    // Cooper 90c1fb05-… (all share the -4fc0-11f1-84b0-52bacf74fa75 suffix).
-    voiceId: env.PULSE_VOICE_ID || "8e67ed57-4fc0-11f1-84b0-52bacf74fa75",
+    // The custom "Pulse" voice the user built (from the stored Pulse persona
+    // a3f92a18…). Override with PULSE_VOICE_ID.
+    voiceId: env.PULSE_VOICE_ID || "96005cba-c7d6-494f-9de9-7cea4d1322b6",
     // Anam's built-in LLM (same default Goblin Labs uses), so the system prompt
     // below actually drives the conversation.
     llmId: env.PULSE_LLM_ID || "a7cf662c-2ace-4de1-a21e-ef0fbf144bb7",
