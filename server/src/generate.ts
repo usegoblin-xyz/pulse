@@ -120,8 +120,10 @@ export interface PrdSource { title: string; url: string; }
 export interface PrdResult { title: string; markdown: string; sources: PrdSource[]; }
 
 // Shared grounding: read a pointed-at page and/or search the topic, returning the
-// research context string and the sources list.
-async function gatherPrdContext(topic: string, url?: string): Promise<{ context: string; sources: PrdSource[] }> {
+// research context string and the sources list. `deep` reads the top search hit
+// in full (better grounding, but slow via Playwright) — off for streaming so the
+// doc starts appearing in seconds instead of after a long silent research pause.
+async function gatherPrdContext(topic: string, url?: string, deep = true): Promise<{ context: string; sources: PrdSource[] }> {
   const sources: PrdSource[] = [];
   let context = "";
 
@@ -140,7 +142,7 @@ async function gatherPrdContext(topic: string, url?: string): Promise<{ context:
       context += `Source — ${r.title} (${r.url}):\n${r.snippet}\n\n`;
     }
     const top = found.results[0];
-    if (top && !url) {
+    if (deep && top && !url) {
       try { const page = await readPage(top.url); context += `Top source read in full — ${page.title}:\n${page.text.slice(0, 4000)}\n\n`; }
       catch { /* snippet is enough */ }
     }
@@ -171,7 +173,7 @@ export async function writePrdStream(
   url: string | undefined,
   hooks: { onSources: (s: PrdSource[]) => void; onToken: (t: string) => void },
 ): Promise<PrdResult> {
-  const { context, sources } = await gatherPrdContext(topic, url);
+  const { context, sources } = await gatherPrdContext(topic, url, false); // snippets only -> fast start
   hooks.onSources(sources);
   const markdown = (await generateTextStream(PRD_SYSTEM, prdUserPrompt(topic, context), hooks.onToken)).trim();
   return { title: titleFrom(markdown, topic), markdown, sources };
