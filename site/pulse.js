@@ -300,6 +300,17 @@ async function screenTick() {
   } catch { /* timeout/abort or network — keep the last good context */ } finally { describing = false; }
 }
 
+// Prime the VLM's vision slot at session start (fire-and-forget, tiny image) so
+// the first real look after Share screen is warm (~seconds) instead of cold (~18s).
+async function warmVision() {
+  try {
+    await fetch(`${BRAIN}/see`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ image: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMCAoGYb8f5AAAAAElFTkSuQmCC", question: "warmup" }),
+    });
+  } catch { /* best effort */ }
+}
+
 async function lookAtScreen() {
   if (!screenStream) return "You haven't shared your screen yet. Click Share screen, and for me to follow you across tabs, pick your whole screen. Then I'll take a look.";
   // Ambient loop keeps this fresh — answer instantly when it is. Window is wide
@@ -471,6 +482,7 @@ async function start() {
       setStatus("");
       enable(stopBtn, true); enable(screenBtn, true); enable(pipBtn, true);
       if (poster) poster.style.opacity = "0";
+      warmVision(); // prime the VLM so the first screen look is fast
       client.talk("I'm Pulse. Ask me anything and I'll go read the web and come back with the real answer, or share your screen and I'll tell you what I see.");
     });
     client.addListener(AnamEvent.CONNECTION_CLOSED, stop);
