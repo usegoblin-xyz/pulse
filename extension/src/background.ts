@@ -130,6 +130,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   }
   if (msg?.type === "fillForPulse") {
     (async () => {
+      // Voice fill reaches a tab the user isn't clicking the extension on, so it
+      // needs the broad site access — granted at runtime via the popup, not at
+      // install. Without it, tell the page to prompt the user to enable it.
+      const granted = await chrome.permissions.contains({ origins: ["https://*/*", "http://*/*"] });
+      if (!granted) return reply({ ok: false, error: "hands-free not enabled" });
       const target = await resolveTargetTab(sender.tab?.id);
       if (!target?.id) return reply({ ok: false, error: "no form tab" });
       reply(await fillTab(target, { brainUrl: msg.brainUrl, profile: msg.profile }));

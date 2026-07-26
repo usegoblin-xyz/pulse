@@ -4,8 +4,9 @@
   "version": "0.2.0",
   "description": "Fills web forms from your own saved details. Reads the page, fills what it can, and never submits for you.",
   "icons": { "16": "icons/icon-16.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
-  "permissions": ["scripting", "storage", "tabs"],
-  "host_permissions": ["http://*/*", "https://*/*"],
+  "permissions": ["activeTab", "scripting", "storage"],
+  "optional_permissions": ["tabs"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": {
     "default_title": "Pulse — fill this form",

@@ -29,10 +29,13 @@ https://pulse-demo.fly.dev/privacy.html
 Fill web forms from the user's own saved details.
 
 ## Permission justifications
+Install-time permissions are minimal; broad site access is optional and only
+requested at runtime when the user turns on hands-free fill.
+
+- **activeTab** — when the user clicks the Pulse icon and "Fill this form", grants access to just that one tab to read and fill it. No standing access.
+- **scripting** — to inject the content script that reads the form and types the values into the page the user asked to fill.
 - **storage** — to keep the user's saved details (name, email, address, etc.) locally on their device.
-- **scripting** — to inject the content script that reads the form and types the values into the page the user asks to fill.
-- **tabs** — to identify the tab the user is currently on so Pulse fills the right page.
-- **host access (all sites)** — Pulse fills forms on whatever website the user is on, so it needs to run on the page they trigger it on. It acts only on the user's explicit request (the popup button or the Pulse assistant), never in the background, and never reads or transmits page contents beyond the form's field structure.
+- **optional: tabs + host access (all sites)** — NOT requested at install. Only requested at runtime, via a Chrome prompt the user approves, when they enable "hands-free fill" so Pulse can fill a form on another tab by voice. It acts only on the user's request, never in the background, and never reads or transmits page contents beyond the form's field structure.
 
 ## Data usage disclosures
 - Collects personally identifiable information (name, address, email, phone) that the user chooses to save — used only to fill forms.

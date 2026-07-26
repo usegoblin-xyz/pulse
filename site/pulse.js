@@ -190,6 +190,7 @@ async function fillForm() {
     const r = await extCall("fill", { brainUrl: BRAIN || window.location.origin });
     if (r == null) return "My browser helper didn't answer. Make sure the Pulse extension is on and try again.";
     if (!r.ok) {
+      if (r.error === "hands-free not enabled") return "To fill it for you across tabs, open the Pulse extension and switch on hands-free fill, then ask me again. Until then, I can walk you through it.";
       if (r.error === "no form tab") return "Open the page with the form in another tab, then ask me again.";
       if (String(r.error || "").includes("no details")) return "I don't have your details saved yet. Open the Pulse extension and add them.";
       return "I couldn't fill that just now. Give it another go in a moment.";
