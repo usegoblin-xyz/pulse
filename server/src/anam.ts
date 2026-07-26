@@ -77,6 +77,24 @@ export const READ_PAGE_TOOL = {
   awaitResult: true,
 } as const;
 
+// Pulse researches a topic and writes a full product requirements document,
+// surfaced to the user as a downloadable document. Handler in pulse.js.
+export const BUILD_PRD_TOOL = {
+  type: "client",
+  name: "build_prd",
+  description:
+    "Research a product idea and write a detailed product requirements document (a PRD) for it, then surface it to the user to read and download. Call this whenever the user asks you to build, write, spin up, or draft a PRD, a product spec, a requirements doc, or a feature plan, or points you at a product or website and asks for a spec or a plan to build something like it. Pass the product idea as topic, and if the user pointed you at a specific web page, pass its address as url. You do the web research yourself. Returns the document's title and a short summary you should read back.",
+  parameters: {
+    type: "object",
+    properties: {
+      topic: { type: "string", description: "the product idea or thing to spec, in a sentence" },
+      url: { type: "string", description: "optional web address the user pointed at, to base the PRD on" },
+    },
+    required: ["topic"],
+  },
+  awaitResult: true,
+} as const;
+
 // Lets Pulse actually look at the shared screen (a vision model reads a
 // screenshot). Handler is registered client-side in pulse.js.
 export const LOOK_AT_SCREEN_TOOL = {
@@ -98,7 +116,7 @@ export function buildPersonaConfig(cfg: AnamConfig): Record<string, unknown> {
     llmId: cfg.llmId,
     avatarModel: cfg.avatarModel,
     systemPrompt: cfg.systemPrompt,
-    tools: [WEB_SEARCH_TOOL, READ_PAGE_TOOL, LOOK_AT_SCREEN_TOOL],
+    tools: [WEB_SEARCH_TOOL, READ_PAGE_TOOL, BUILD_PRD_TOOL, LOOK_AT_SCREEN_TOOL],
   };
 }
 

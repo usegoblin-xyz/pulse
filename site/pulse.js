@@ -22,6 +22,16 @@ let screenStream = null;
 let screenVideo = null;
 let companionWin = null;
 
+// Ambient screen sight: while sharing, a loop keeps a fresh understanding of
+// what's on screen (even across tabs), so look_at_screen answers instantly and
+// Pulse can work alongside the user instead of asking "what's on screen?".
+let screenLoop = null;
+let lastSig = null;
+let describing = false;
+let screenContext = { text: "", at: 0 };
+const AMBIENT_PROMPT =
+  "In one or two short sentences, say what app or web page is on screen right now and the main things visible on it. Plain text, no lists.";
+
 // Conversation capture — Anam's server transcript comes back empty for Pulse,
 // so we stream the live message history to the brain ourselves.
 let conversationId = null;
@@ -98,6 +108,80 @@ function renderReading(title, url, screenshot) {
   if (rpCaption) rpCaption.textContent = title ? `${title} — ${domainOf(url)}` : domainOf(url);
 }
 
+/* ---------- document panel (PRDs Pulse writes) ---------- */
+const docPanel = document.getElementById("doc-panel");
+const docTitle = document.getElementById("doc-title");
+const docBody = document.getElementById("doc-body");
+const docDownload = document.getElementById("doc-download");
+let currentDoc = null; // { title, markdown }
+
+function escHtml(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function mdToHtml(md) {
+  const inline = (t) => t
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*(?!\*)(.+?)\*(?!\*)/g, "$1<em>$2</em>")
+    .replace(/`(.+?)`/g, "<code>$1</code>");
+  let html = "", inList = false;
+  for (const raw of escHtml(md).split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    const li = line.match(/^\s*[-*]\s+(.*)$/) || line.match(/^\s*\d+\.\s+(.*)$/);
+    if (h) { if (inList) { html += "</ul>"; inList = false; } const lv = h[1].length; html += `<h${lv}>${inline(h[2])}</h${lv}>`; continue; }
+    if (li) { if (!inList) { html += "<ul>"; inList = true; } html += `<li>${inline(li[1])}</li>`; continue; }
+    if (!line) { if (inList) { html += "</ul>"; inList = false; } continue; }
+    if (inList) { html += "</ul>"; inList = false; }
+    html += `<p>${inline(line)}</p>`;
+  }
+  if (inList) html += "</ul>";
+  return html;
+}
+function slug(s) { return (s || "prd").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "prd"; }
+function openDoc(loadingText) {
+  docPanel?.classList.add("show");
+  if (docTitle) docTitle.textContent = "Working on it…";
+  if (docBody) docBody.innerHTML = `<p class="doc-loading">${escHtml(loadingText || "Researching and writing…")}</p>`;
+  if (docDownload) docDownload.style.display = "none";
+}
+function renderDoc(doc) {
+  currentDoc = doc;
+  docPanel?.classList.add("show");
+  if (docTitle) docTitle.textContent = doc.title;
+  if (docBody) {
+    let html = mdToHtml(doc.markdown);
+    if (Array.isArray(doc.sources) && doc.sources.length) {
+      html += `<h2>Sources</h2><ul>` + doc.sources.map((s) => `<li><a href="${escHtml(s.url)}" target="_blank" rel="noopener">${escHtml(s.title || s.url)}</a></li>`).join("") + `</ul>`;
+    }
+    docBody.innerHTML = html;
+    docBody.scrollTop = 0;
+  }
+  if (docDownload) docDownload.style.display = "inline-block";
+}
+docDownload?.addEventListener("click", () => {
+  if (!currentDoc) return;
+  const blob = new Blob([currentDoc.markdown], { type: "text/markdown" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = slug(currentDoc.title) + ".md";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+});
+document.getElementById("doc-close")?.addEventListener("click", () => docPanel?.classList.remove("show"));
+
+async function buildPrd(topic, url) {
+  topic = (topic || "").trim();
+  if (!topic && !url) return "Tell me what you'd like a PRD for and I'll research it and write one.";
+  openDoc(`Researching and writing a PRD for ${topic || url}. This takes a few seconds…`);
+  let data;
+  try {
+    const res = await fetch(`${BRAIN}/prd`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ topic, url }),
+    });
+    if (!res.ok) { docPanel?.classList.remove("show"); return "I couldn't write that document just now. Give me another go in a moment."; }
+    data = await res.json();
+  } catch { docPanel?.classList.remove("show"); return "I couldn't reach my writing tools just then."; }
+  renderDoc(data);
+  return `Your PRD, "${data.title}", is ready on screen and you can download it. It lays out the problem, the users, the key features with priorities, the requirements, milestones, risks, and success metrics. Want me to expand or change any part?`;
+}
+
 /* ---------- the three research tools ---------- */
 
 // Search the live web. Renders the sources and returns a compact digest Pulse
@@ -160,23 +244,69 @@ async function captureScreenFrame() {
     return canvas.toDataURL("image/jpeg", 0.6);
   } catch (e) { console.error("[pulse] captureScreenFrame failed", e); return null; }
 }
-async function lookAtScreen() {
-  if (!screenStream) return "You haven't shared your screen yet. Click Share screen, pick the window you want me to look at, and I'll take a look.";
+// A tiny fingerprint of the current frame, so the ambient loop only spends a
+// vision call when the screen actually changed (or the context has gone stale).
+function screenSignature() {
+  if (!screenVideo || !screenVideo.videoWidth) return null;
+  const c = document.createElement("canvas"); c.width = 32; c.height = 18;
+  const ctx = c.getContext("2d");
+  ctx.drawImage(screenVideo, 0, 0, 32, 18);
+  return ctx.getImageData(0, 0, 32, 18).data;
+}
+function sigChanged(sig) {
+  if (!sig) return false;
+  if (!lastSig) return true;
+  let diff = 0; const n = Math.min(sig.length, lastSig.length);
+  for (let i = 0; i < n; i += 4) diff += Math.abs(sig[i] - lastSig[i]); // red channel is enough
+  return diff / ((n / 4) * 255) > 0.05;
+}
+
+async function describeNow(prompt) {
   const image = await captureScreenFrame();
-  if (!image) return "I couldn't grab your screen just then. Try sharing it again.";
+  if (!image) return null;
+  const res = await fetch(`${BRAIN}/see`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ image, question: prompt }),
+  });
+  if (res.status === 503) return "___novision___";
+  if (!res.ok) return null;
+  const { text } = await res.json();
+  return text || null;
+}
+
+// Runs every few seconds while sharing. Silent — it just keeps screenContext
+// fresh so Pulse always has current sight without narrating every change.
+async function screenTick() {
+  if (!screenStream || describing) return;
+  const sig = screenSignature();
+  const changed = sigChanged(sig);
+  if (sig) lastSig = sig;
+  const stale = Date.now() - screenContext.at > 20000;
+  if (!changed && !stale) return;
+  describing = true;
   try {
-    const res = await fetch(`${BRAIN}/see`, {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ image }),
-    });
-    if (res.status === 503) return "My eyes aren't switched on yet. My vision needs a key added in settings.";
-    if (!res.ok) return "I looked but couldn't quite make it out just then.";
-    const { text } = await res.json();
-    return text || "I looked but couldn't tell what's there.";
+    const text = await describeNow(AMBIENT_PROMPT);
+    if (text && text !== "___novision___") screenContext = { text, at: Date.now() };
+  } catch { /* keep the last good context */ } finally { describing = false; }
+}
+
+async function lookAtScreen() {
+  if (!screenStream) return "You haven't shared your screen yet. Click Share screen, and for me to follow you across tabs, pick your whole screen. Then I'll take a look.";
+  // Ambient loop keeps this fresh — answer instantly when it is.
+  if (screenContext.text && Date.now() - screenContext.at < 8000) return screenContext.text;
+  try {
+    const text = await describeNow("Look at this screen. In two or three short spoken sentences, say what app or page it is and the main things on it. Plain speech, no lists.");
+    if (text === "___novision___") return "My eyes aren't switched on yet. My vision needs a key added in settings.";
+    if (!text) return "I looked but couldn't quite make it out just then.";
+    screenContext = { text, at: Date.now() };
+    return text;
   } catch { return "I couldn't reach my vision just then."; }
 }
 
 /* ---------- Share screen ---------- */
 function stopScreen() {
+  if (screenLoop) { clearInterval(screenLoop); screenLoop = null; }
+  screenContext = { text: "", at: 0 }; lastSig = null;
   screenStream?.getTracks().forEach((t) => t.stop());
   screenStream = null;
   if (screenVideo) { screenVideo.srcObject = null; screenVideo.remove(); screenVideo = null; }
@@ -185,7 +315,10 @@ function stopScreen() {
 async function toggleScreen() {
   if (screenStream) { stopScreen(); return; }
   try {
-    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 4 } });
+    // Prefer a monitor surface so it follows the user across tabs and apps.
+    screenStream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: 4, displaySurface: "monitor" },
+    });
     screenBtn.textContent = "Stop sharing";
     screenVideo = document.createElement("video");
     screenVideo.srcObject = screenStream;
@@ -193,7 +326,11 @@ async function toggleScreen() {
     screenVideo.style.cssText = "position:fixed;left:-9999px;width:1px;height:1px";
     document.body.appendChild(screenVideo);
     await screenVideo.play().catch(() => {});
-    client?.sendUserMessage?.("[The user just shared their screen. Call look_at_screen now, then tell them what you see.]");
+    // Warm the first read, then keep sight fresh in the background.
+    screenTick();
+    if (screenLoop) clearInterval(screenLoop);
+    screenLoop = setInterval(screenTick, 4000);
+    client?.sendUserMessage?.("[The user just shared their screen and you can now see it continuously, including as they change tabs. Call look_at_screen now, tell them what you see, and if they shared only one tab, remind them once they can share their whole screen so you can follow along.]");
     screenStream.getVideoTracks()[0].addEventListener("ended", stopScreen);
   } catch { setStatus("Screen share was cancelled."); }
 }
@@ -255,6 +392,15 @@ async function start() {
           console.log("[pulse] read_page", url);
           try { return await readPage(String(url)); }
           catch (e) { console.error("[pulse] read_page", e); return "Something went wrong reading that page."; }
+        },
+      });
+      client.registerToolCallHandler?.("build_prd", {
+        onStart: async (p) => {
+          const topic = p?.arguments?.topic ?? "";
+          const url = p?.arguments?.url ?? "";
+          console.log("[pulse] build_prd", topic, url);
+          try { return await buildPrd(String(topic), String(url)); }
+          catch (e) { console.error("[pulse] build_prd", e); return "Something went wrong writing that document."; }
         },
       });
       client.registerToolCallHandler?.("look_at_screen", {

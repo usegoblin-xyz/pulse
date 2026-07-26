@@ -18,6 +18,7 @@ import { mintSessionToken, anamConfigFromEnv } from "./anam.js";
 import { describeScreen, planAction, visionConfigFromEnv } from "./vision.js";
 import { startRun, getFrame } from "./browser.js";
 import { search, readPage, searchConfigFromEnv } from "./research.js";
+import { writePrd } from "./generate.js";
 import type { FormField, Profile } from "./types.js";
 
 const PORT = Number(process.env.PORT || 8787);
@@ -256,6 +257,25 @@ const server = http.createServer(async (req, res) => {
     } catch (e: any) {
       console.error("[research/read]", e?.message ?? e);
       res.writeHead(502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not open that page" }));
+    }
+    return;
+  }
+
+  // --- generate a PRD from a topic (grounded in live research) ---
+  if (req.method === "POST" && req.url === "/prd") {
+    try {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      const topic = String(body.topic || "").slice(0, 500);
+      const url = body.url ? String(body.url) : undefined;
+      if (!topic.trim() && !url) {
+        res.writeHead(400, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "topic or url required" }));
+        return;
+      }
+      const out = await writePrd(topic || url!, url);
+      res.writeHead(200, { "content-type": "application/json", ...cors }).end(JSON.stringify(out));
+    } catch (e: any) {
+      console.error("[prd]", e?.message ?? e);
+      res.writeHead(502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not write the document just now" }));
     }
     return;
   }
