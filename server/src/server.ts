@@ -78,6 +78,18 @@ function readBody(req: http.IncomingMessage, max = MAX_BODY): Promise<string> {
 
 const vision = visionConfigFromEnv();
 
+// Conversation capture. Anam's own transcript store comes back empty for this
+// persona, so the client streams the live message history here instead. In
+// memory (single always-warm machine); keep the most recent sessions.
+interface StoredTranscript { messages: Array<{ role: string; content: string }>; ua?: string; startedAt: number; updatedAt: number; }
+const transcripts = new Map<string, StoredTranscript>();
+let latestSession: string | null = null;
+function pruneTranscripts() {
+  if (transcripts.size <= 100) return;
+  const oldest = [...transcripts.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt)[0];
+  if (oldest) transcripts.delete(oldest[0]);
+}
+
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -138,6 +150,36 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && req.url === "/health") {
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  // --- conversation capture (the client streams the live message history) ---
+  if (req.method === "POST" && req.url === "/transcript") {
+    try {
+      const body = JSON.parse((await readBody(req, 512 * 1024)) || "{}");
+      const sessionId = String(body.sessionId || "").slice(0, 100);
+      const messages = Array.isArray(body.messages)
+        ? body.messages.slice(-200).map((m: any) => ({ role: String(m?.role || "?"), content: String(m?.content ?? "").slice(0, 4000) }))
+        : [];
+      if (!sessionId) { res.writeHead(400, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "sessionId required" })); return; }
+      const now = Date.now();
+      const prev = transcripts.get(sessionId);
+      transcripts.set(sessionId, { messages, ua: body.ua ? String(body.ua).slice(0, 200) : prev?.ua, startedAt: prev?.startedAt ?? now, updatedAt: now });
+      latestSession = sessionId;
+      pruneTranscripts();
+      res.writeHead(200, { "content-type": "application/json", ...cors }).end(JSON.stringify({ ok: true }));
+    } catch (e: any) {
+      console.error("[transcript]", e?.message ?? e);
+      res.writeHead(400, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "bad transcript" }));
+    }
+    return;
+  }
+  if (req.method === "GET" && req.url?.startsWith("/transcript")) {
+    const q = new URL(req.url, "http://x").searchParams;
+    const id = q.get("session") || (req.url.includes("/latest") ? latestSession : null) || latestSession;
+    const t = id ? transcripts.get(id) : null;
+    if (!t) { res.writeHead(404, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "no transcript" })); return; }
+    res.writeHead(200, { "content-type": "application/json", ...cors }).end(JSON.stringify({ sessionId: id, ...t }));
     return;
   }
 

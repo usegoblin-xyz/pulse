@@ -37,6 +37,24 @@ let client = null;
 let screenStream = null;
 let companionWin = null;
 
+// Conversation capture — Anam's server transcript comes back empty for Pulse,
+// so we stream the live message history to the brain ourselves.
+let conversationId = null;
+let latestMessages = [];
+let transcriptTimer = null;
+async function saveTranscript() {
+  if (!conversationId || !latestMessages.length) return;
+  try {
+    await fetch(`${BRAIN}/transcript`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: conversationId, ua: navigator.userAgent,
+        messages: latestMessages.map((m) => ({ role: m.role, content: m.content })),
+      }),
+    });
+  } catch { /* best-effort */ }
+}
+
 /* ---------- extension bridge (fill forms on any tab) ----------
  * The Pulse extension injects a relay content script on this page. We talk to
  * it over window.postMessage; it carries the fill to whatever tab the user is
@@ -303,6 +321,13 @@ async function start() {
     client = createClient(sessionToken);
     window.__pulseClient = client; // test/debug hook
 
+    // Capture the conversation as it happens (debounced save to the brain).
+    conversationId = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
+    client.addListener(AnamEvent.MESSAGE_HISTORY_UPDATED, (messages) => {
+      if (Array.isArray(messages)) latestMessages = messages;
+      if (!transcriptTimer) transcriptTimer = setTimeout(() => { transcriptTimer = null; saveTranscript(); }, 2500);
+    });
+
     // Register the fill_form handler BEFORE streaming, or an early tool call is missed.
     try {
       client.registerToolCallHandler?.("fill_form", {
@@ -366,6 +391,8 @@ function stop() {
   if (companionWin && !companionWin.closed) companionWin.close();
   stopScreen();
   if (sayForm) sayForm.style.display = "none";
+  if (transcriptTimer) { clearTimeout(transcriptTimer); transcriptTimer = null; }
+  saveTranscript(); // flush the final conversation
   if (client) { client.stopStreaming(); client = null; }
   if (poster) poster.style.opacity = "1";
   enable(stopBtn, false); enable(screenBtn, false); enable(pipBtn, false);
