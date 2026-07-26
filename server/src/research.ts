@@ -17,10 +17,10 @@ const UA =
 export interface SearchResult { title: string; url: string; snippet: string; }
 export interface SearchResponse { answer?: string; results: SearchResult[]; provider: string; }
 
-export interface SearchConfig { provider: "tavily" | "ddg"; apiKey: string; }
+export interface SearchConfig { provider: "tavily" | "wikipedia"; apiKey: string; }
 export function searchConfigFromEnv(env = process.env): SearchConfig {
   const apiKey = env.PULSE_SEARCH_API_KEY || "";
-  const provider = (env.PULSE_SEARCH_PROVIDER as "tavily" | "ddg") || (apiKey ? "tavily" : "ddg");
+  const provider = (env.PULSE_SEARCH_PROVIDER as "tavily" | "wikipedia") || (apiKey ? "tavily" : "wikipedia");
   return { provider, apiKey };
 }
 
@@ -33,38 +33,24 @@ function stripTags(s: string): string {
     .trim();
 }
 
-// DuckDuckGo's HTML endpoint wraps outbound links in a redirect; pull the real
-// URL out of the uddg query param when present.
-function unwrapDdg(href: string): string {
-  const m = href.match(/[?&]uddg=([^&]+)/);
-  if (m) { try { return decodeURIComponent(m[1]); } catch { /* fall through */ } }
-  return href.startsWith("//") ? "https:" + href : href;
-}
-
-async function searchDdg(query: string, max: number): Promise<SearchResponse> {
-  const res = await fetch("https://html.duckduckgo.com/html/", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded", "user-agent": UA, accept: "text/html" },
-    body: new URLSearchParams({ q: query }).toString(),
-  });
-  if (!res.ok) throw new Error(`ddg ${res.status}`);
-  const html = await res.text();
-  const results: SearchResult[] = [];
-  // Each result: <a ... class="result__a" href="HREF">TITLE</a> ... <a class="result__snippet">SNIP</a>
-  const linkRe = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
-  const snipRe = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
-  const snips: string[] = [];
-  let sm: RegExpExecArray | null;
-  while ((sm = snipRe.exec(html))) snips.push(stripTags(sm[1]));
-  let lm: RegExpExecArray | null; let i = 0;
-  while ((lm = linkRe.exec(html)) && results.length < max) {
-    const url = unwrapDdg(lm[1]);
-    const title = stripTags(lm[2]);
-    if (!title || !/^https?:\/\//.test(url)) { i++; continue; }
-    results.push({ title, url, snippet: snips[i] || "" });
-    i++;
-  }
-  return { results, provider: "duckduckgo" };
+// Keyless fallback that works from a datacenter IP. Web search engines
+// (DuckDuckGo, Google, Bing) all challenge server traffic, so the zero-config
+// path uses Wikipedia's open search API — narrow, but reliable and enough for
+// factual questions, and it pairs with readPage (which loads any real page).
+async function searchWikipedia(query: string, max: number): Promise<SearchResponse> {
+  const api =
+    "https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&utf8=1" +
+    `&srlimit=${max}&srsearch=${encodeURIComponent(query)}`;
+  const res = await fetch(api, { headers: { "user-agent": "PulseResearch/1.0 (pulse-demo.fly.dev)", accept: "application/json" } });
+  if (!res.ok) throw new Error(`wikipedia ${res.status}`);
+  const data: any = await res.json();
+  const hits: any[] = Array.isArray(data?.query?.search) ? data.query.search : [];
+  const results: SearchResult[] = hits.slice(0, max).map((h) => ({
+    title: String(h?.title || ""),
+    url: "https://en.wikipedia.org/wiki/" + encodeURIComponent(String(h?.title || "").replace(/ /g, "_")),
+    snippet: stripTags(String(h?.snippet || "")),
+  }));
+  return { results, provider: "wikipedia" };
 }
 
 async function searchTavily(query: string, max: number, apiKey: string): Promise<SearchResponse> {
@@ -93,9 +79,9 @@ export async function search(query: string, cfg: SearchConfig, max = 6): Promise
   if (!q) return { results: [], provider: cfg.provider };
   if (cfg.provider === "tavily" && cfg.apiKey) {
     try { return await searchTavily(q, max, cfg.apiKey); }
-    catch (e: any) { console.error("[search] tavily failed, falling back to ddg:", e?.message ?? e); }
+    catch (e: any) { console.error("[search] tavily failed, falling back to wikipedia:", e?.message ?? e); }
   }
-  return searchDdg(q, max);
+  return searchWikipedia(q, max);
 }
 
 // --- reading a page in full ---
