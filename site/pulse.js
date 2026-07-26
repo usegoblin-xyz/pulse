@@ -30,8 +30,6 @@ const pipBtn = document.getElementById("pip-button");
 const status = document.getElementById("status");
 const poster = document.getElementById("poster");
 const videoEl = document.getElementById("persona-video");
-const sayForm = document.getElementById("say-form");
-const sayInput = document.getElementById("say-input");
 
 let client = null;
 let screenStream = null;
@@ -373,7 +371,6 @@ async function start() {
     client.addListener(AnamEvent.SESSION_READY, () => {
       setStatus(""); // stay clean on connect — the live avatar + text box are signal enough
       enable(stopBtn, true); enable(screenBtn, true); enable(pipBtn, true);
-      if (sayForm) sayForm.style.display = "block";
       if (poster) poster.style.opacity = "0";
       const known = Object.keys(getPageProfile()).length > 0;
       client.talk(known
@@ -400,7 +397,6 @@ async function start() {
 function stop() {
   if (companionWin && !companionWin.closed) companionWin.close();
   stopScreen();
-  if (sayForm) sayForm.style.display = "none";
   if (transcriptTimer) { clearTimeout(transcriptTimer); transcriptTimer = null; }
   saveTranscript(); // flush the final conversation
   if (client) { client.stopStreaming(); client = null; }
@@ -414,8 +410,3 @@ startBtn?.addEventListener("click", start);
 stopBtn?.addEventListener("click", stop);
 screenBtn?.addEventListener("click", toggleScreen);
 pipBtn?.addEventListener("click", toggleCompanion);
-sayForm?.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const t = sayInput.value.trim();
-  if (t && client) { logMsg("user", t); client.sendUserMessage?.(t); sayInput.value = ""; }
-});
