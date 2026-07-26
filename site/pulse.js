@@ -486,7 +486,7 @@ async function start() {
       setStatus("");
       enable(stopBtn, true); enable(screenBtn, true); enable(pipBtn, true);
       if (poster) poster.style.opacity = "0";
-      client.talk("I'm Pulse. Ask me anything and I'll go read the web and come back with the real answer, or share your screen and I'll tell you what I see.");
+      client.talk("Greetings. I can help you get better at generative AI research. What would you like to learn?");
     });
     client.addListener(AnamEvent.CONNECTION_CLOSED, stop);
     // Capture the mic ourselves with speech-friendly processing (auto-gain lifts
