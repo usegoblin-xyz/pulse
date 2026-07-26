@@ -164,8 +164,13 @@
       .fb-doc-body li{margin:0 0 4px}
       .fb-doc-body strong{color:#fff}
       .fb-doc-body code{background:rgba(255,255,255,.08);padding:1px 5px;border-radius:5px;font-size:12px}
-      .fb-doc-sources{font-size:11px;color:#8aa0bd;margin-top:8px}
-      .fb-doc-sources a{color:#7fb0ff}
+      .fb-src-toggle{background:none;border:none;color:#7fb0ff;font:inherit;font-size:12px;
+        font-weight:600;cursor:pointer;padding:8px 0 0;text-decoration:underline}
+      .fb-doc-sources{display:flex;flex-direction:column;gap:5px;margin-top:8px;font-size:12px}
+      .fb-doc-sources[hidden]{display:none}
+      .fb-doc-sources a{color:#7fb0ff;text-decoration:none;line-height:1.35}
+      .fb-doc-sources a:hover{text-decoration:underline}
+      .fb-doc-sources span{color:#9fb4d0;line-height:1.35}
       .fb-err{color:#ea9a9a;font-size:13px}
       @media (max-width:980px){
         #files-box{width:100vw;height:70vh;top:0;bottom:auto;border-right:none;
@@ -250,6 +255,6 @@
     <!-- Wires "Start conversation" to a live Anam avatar session via the brain
          (server/), and gives the avatar its research tools (web_search,
          read_page, look_at_screen). -->
-    <script type="module" src="pulse.js?v=31"></script>
+    <script type="module" src="pulse.js?v=32"></script>
   </body>
 </html>

@@ -58,7 +58,8 @@ function enable(btn, on) {
   btn.style.opacity = on ? "1" : ".55";
 }
 function domainOf(u) {
-  try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; }
+  try { return new URL(u).hostname.replace(/^www\./, ""); }
+  catch { const m = String(u).match(/https?:\/\/([^/?#]+)/); return m ? m[1].replace(/^www\./, "") : "source"; }
 }
 
 /* ---------- research panel (shows Pulse's sources and what he's reading) ---------- */
@@ -148,8 +149,17 @@ function docsHtml() {
       : `<span class="fb-writing">${d.error ? "" : "writing…"}</span>`;
     const body = d.error ? `<p class="fb-err">${escHtml(d.error)}</p>`
       : (d.markdown ? mdToHtml(d.markdown) : `<p class="fb-writing">researching the web…</p>`);
-    const srcs = (d.done && d.sources && d.sources.length)
-      ? `<div class="fb-doc-sources">Sources: ${d.sources.map((s) => `<a href="${escHtml(s.url)}" target="_blank" rel="noopener">${escHtml(domainOf(s.url))}</a>`).join(", ")}</div>` : "";
+    const n = (d.done && d.sources && d.sources.length) || 0;
+    const label = `View source${n === 1 ? "" : "s"}`;
+    const srcs = n
+      ? `<button class="fb-src-toggle" data-id="${d.id}" data-label="${label}">${label}</button>` +
+        `<div class="fb-doc-sources" data-src="${d.id}" hidden>` +
+        d.sources.map((s) => {
+          const ok = /^https?:\/\//i.test(s.url);
+          const text = escHtml(s.title || domainOf(s.url));
+          return ok ? `<a href="${escHtml(s.url)}" target="_blank" rel="noopener">${text}</a>` : `<span>${text}</span>`;
+        }).join("") + `</div>`
+      : "";
     return `<div class="fb-doc" data-id="${d.id}"><div class="fb-doc-head"><span class="fb-doc-title">${escHtml(d.label)}</span>${action}</div><div class="fb-doc-body">${body}</div>${srcs}</div>`;
   }).join("");
 }
@@ -182,7 +192,21 @@ function downloadDoc(id) {
 }
 function announce(text) { try { client?.talk?.(text); } catch (e) { console.error("[pulse] announce", e); } }
 
-fbDocs?.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest(".fb-dl"); if (b) downloadDoc(b.dataset.id); });
+// Delegated clicks for a files container (works for both the main box and the
+// Companion mirror): download buttons, and the "View sources" toggle.
+function wireFilesClicks(container) {
+  if (!container) return;
+  container.addEventListener("click", (e) => {
+    const dl = e.target.closest && e.target.closest(".fb-dl");
+    if (dl) { downloadDoc(dl.dataset.id); return; }
+    const tg = e.target.closest && e.target.closest(".fb-src-toggle");
+    if (tg) {
+      const list = container.querySelector(`.fb-doc-sources[data-src="${tg.dataset.id}"]`);
+      if (list) { const show = list.hasAttribute("hidden"); if (show) list.removeAttribute("hidden"); else list.setAttribute("hidden", ""); tg.textContent = show ? "Hide sources" : tg.dataset.label; }
+    }
+  });
+}
+wireFilesClicks(fbDocs);
 document.getElementById("fb-close")?.addEventListener("click", () => filesBox?.classList.remove("show"));
 
 let renderTimer = null;
@@ -360,8 +384,11 @@ const COMPANION_CSS = `
   .fb-doc-body p{margin:0 0 5px}
   .fb-doc-body ul{margin:0 0 6px;padding-left:16px}
   .fb-doc-body strong{color:#fff}
-  .fb-doc-sources{font-size:10px;color:#8aa0bd;margin-top:5px}
-  .fb-doc-sources a{color:#7fb0ff}
+  .fb-src-toggle{background:none;border:none;color:#7fb0ff;font:inherit;font-size:10.5px;font-weight:600;cursor:pointer;padding:6px 0 0;text-decoration:underline}
+  .fb-doc-sources{display:flex;flex-direction:column;gap:3px;margin-top:5px;font-size:10px}
+  .fb-doc-sources[hidden]{display:none}
+  .fb-doc-sources a{color:#7fb0ff;text-decoration:none}
+  .fb-doc-sources span{color:#9fb4d0}
   .fb-err{color:#e88;font-size:11.5px}
   .cp-empty{font-size:11px;color:#8090a5;font-style:italic;padding:6px 2px}
 `;
@@ -386,7 +413,7 @@ async function toggleCompanion() {
     `<div class="cp-h" style="margin-top:10px">Documents</div><div class="cp-docs"></div>`;
   d.body.appendChild(files);
   companionFb = { sources: files.querySelector(".cp-sources"), docs: files.querySelector(".cp-docs") };
-  companionFb.docs.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest(".fb-dl"); if (b) downloadDoc(b.dataset.id); });
+  wireFilesClicks(companionFb.docs);
   renderFiles();
 
   companionWin.addEventListener("pagehide", () => { pipVideo.srcObject = null; companionFb = null; });

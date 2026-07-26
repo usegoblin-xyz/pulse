@@ -57,6 +57,18 @@ async function searchWikipedia(query: string, max: number): Promise<SearchRespon
   return { results, provider: "wikipedia" };
 }
 
+// Nimble sometimes returns a Google-style redirect href (e.g. "/goto?url=CAES…")
+// instead of the final URL. Make it absolute (resolvable via Nimble's redirect)
+// so links aren't broken and don't render as giant encoded strings.
+function normalizeUrl(u: string): string {
+  if (!u) return "";
+  if (/^https?:\/\//i.test(u)) return u;
+  const m = u.match(/[?&]url=(https?[^&]+)/i); // real URL embedded in the redirect
+  if (m) { try { return decodeURIComponent(m[1]); } catch { /* fall through */ } }
+  if (u.startsWith("/")) return "https://sdk.nimbleway.com" + u;
+  return "https://" + u;
+}
+
 // Nimble's SERP API: real Google-backed results, served through Nimble's own
 // network, so it works from a datacenter where the search engines block us.
 async function searchNimble(query: string, max: number, apiKey: string): Promise<SearchResponse> {
@@ -71,7 +83,7 @@ async function searchNimble(query: string, max: number, apiKey: string): Promise
     .slice(0, max)
     .map((r: any) => ({
       title: String(r?.title || ""),
-      url: String(r?.url || ""),
+      url: normalizeUrl(String(r?.url || "")),
       snippet: String(r?.description || r?.content || "").slice(0, 400),
     }))
     .filter((r: SearchResult) => r.url);
