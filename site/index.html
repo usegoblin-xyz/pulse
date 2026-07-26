@@ -75,14 +75,12 @@
       }
       .btns button:not(:disabled):hover{transform:translateY(-1px)}
       #start-button{background:#fff;color:var(--ink);box-shadow:0 10px 30px rgba(0,0,0,.55)}
-      #screen-button,#pip-button,#look-button{
+      #screen-button,#pip-button{
         background:rgba(255,255,255,.08);color:#fff;
         border:1.5px solid rgba(255,255,255,.28);
         backdrop-filter:blur(6px);
       }
-      #screen-button:not(:disabled):hover,#pip-button:not(:disabled):hover,#look-button:hover{background:rgba(255,255,255,.16)}
-      /* "What do you see?" — a deterministic look trigger, shown only while sharing */
-      #look-button{display:none;border-color:rgba(120,180,255,.55);background:rgba(120,180,255,.14);color:#dbe9ff}
+      #screen-button:not(:disabled):hover,#pip-button:not(:disabled):hover{background:rgba(255,255,255,.16)}
       #stop-button{background:transparent;color:#e08585;font-weight:500;padding:9px 24px}
       .btns button:disabled{cursor:default}
 
@@ -192,7 +190,6 @@
         <div class="btns">
           <button id="start-button">Start conversation</button>
           <button id="screen-button" disabled style="opacity:.55">Share screen</button>
-          <button id="look-button">What do you see?</button>
           <button id="pip-button" disabled style="opacity:.55">Companion Mode</button>
           <button id="stop-button" disabled style="opacity:.55">Stop</button>
         </div>
@@ -234,6 +231,6 @@
     <!-- Wires "Start conversation" to a live Anam avatar session via the brain
          (server/), and gives the avatar its research tools (web_search,
          read_page, look_at_screen). -->
-    <script type="module" src="pulse.js?v=28"></script>
+    <script type="module" src="pulse.js?v=29"></script>
   </body>
 </html>

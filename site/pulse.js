@@ -12,7 +12,6 @@ const BRAIN = (window.PULSE_BRAIN_URL || "").replace(/\/$/, "");
 const startBtn = document.getElementById("start-button");
 const stopBtn = document.getElementById("stop-button");
 const screenBtn = document.getElementById("screen-button");
-const lookBtn = document.getElementById("look-button");
 const pipBtn = document.getElementById("pip-button");
 const status = document.getElementById("status");
 const poster = document.getElementById("poster");
@@ -22,17 +21,6 @@ let client = null;
 let screenStream = null;
 let screenVideo = null;
 let companionWin = null;
-
-// Ambient screen sight: while sharing, a loop keeps a fresh understanding of
-// what's on screen (even across tabs), so look_at_screen answers instantly and
-// Pulse can work alongside the user instead of asking "what's on screen?".
-let screenLoop = null;
-let lastSig = null;
-let describing = false;
-let screenContext = { text: "", at: 0 };
-let visionPausedUntil = 0; // set when vision is rate-limited, to stop hammering
-const AMBIENT_PROMPT =
-  "In one or two short sentences, say what app or web page is on screen right now and the main things visible on it. Plain text, no lists.";
 
 // Conversation capture — Anam's server transcript comes back empty for Pulse,
 // so we stream the live message history to the brain ourselves.
@@ -247,103 +235,34 @@ async function captureScreenFrame() {
     return canvas.toDataURL("image/jpeg", 0.6);
   } catch (e) { console.error("[pulse] captureScreenFrame failed", e); return null; }
 }
-// A tiny fingerprint of the current frame, so the ambient loop only spends a
-// vision call when the screen actually changed (or the context has gone stale).
-function screenSignature() {
-  if (!screenVideo || !screenVideo.videoWidth) return null;
-  const c = document.createElement("canvas"); c.width = 32; c.height = 18;
-  const ctx = c.getContext("2d");
-  ctx.drawImage(screenVideo, 0, 0, 32, 18);
-  return ctx.getImageData(0, 0, 32, 18).data;
-}
-function sigChanged(sig) {
-  if (!sig) return false;
-  if (!lastSig) return true;
-  let diff = 0; const n = Math.min(sig.length, lastSig.length);
-  for (let i = 0; i < n; i += 4) diff += Math.abs(sig[i] - lastSig[i]); // red channel is enough
-  return diff / ((n / 4) * 255) > 0.05;
-}
-
-async function describeNow(prompt) {
+// On-demand only: Pulse looks when his LLM calls look_at_screen (e.g. after the
+// share nudge, or when the user asks). Simple and reliable — no ambient loop.
+async function lookAtScreen() {
+  if (!screenStream) return "You haven't shared your screen yet. Click Share screen, pick the window you want me to look at, and I'll take a look.";
   const image = await captureScreenFrame();
-  if (!image) return null;
-  // Hard timeout so a cold or slow VLM can NEVER hang the avatar's turn — the
-  // tool must always return promptly so Pulse actually says something.
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 22000);
+  if (!image) return "I couldn't grab your screen just then. Try sharing it again.";
   try {
     const res = await fetch(`${BRAIN}/see`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ image, question: prompt }), signal: ctrl.signal,
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ image }),
     });
-    if (res.status === 503) return "___loading___";   // model still warming up
-    if (res.status === 429) { visionPausedUntil = Date.now() + 60000; return "___quota___"; }
-    if (!res.ok) return null;
+    if (res.status === 503) return "My eyes aren't switched on yet. My vision needs a key added in settings.";
+    if (!res.ok) return "I looked but couldn't quite make it out just then.";
     const { text } = await res.json();
-    return text || null;
-  } finally { clearTimeout(timer); }
-}
-
-// Runs every few seconds while sharing. Silent — it just keeps screenContext
-// fresh so Pulse always has current sight without narrating every change.
-async function screenTick() {
-  if (!screenStream || describing || Date.now() < visionPausedUntil) return;
-  const sig = screenSignature();
-  const changed = sigChanged(sig);
-  if (sig) lastSig = sig;
-  const stale = Date.now() - screenContext.at > 20000;
-  if (!changed && !stale) return;
-  describing = true;
-  try {
-    const text = await describeNow(AMBIENT_PROMPT);
-    if (text && !text.startsWith("___")) screenContext = { text, at: Date.now() };
-  } catch { /* timeout/abort or network — keep the last good context */ } finally { describing = false; }
-}
-
-// Prime the VLM's vision slot at session start (fire-and-forget, tiny image) so
-// the first real look after Share screen is warm (~seconds) instead of cold (~18s).
-async function warmVision() {
-  try {
-    await fetch(`${BRAIN}/see`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ image: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMCAoGYb8f5AAAAAElFTkSuQmCC", question: "warmup" }),
-    });
-  } catch { /* best effort */ }
-}
-
-async function lookAtScreen() {
-  if (!screenStream) return "You haven't shared your screen yet. Click Share screen, and for me to follow you across tabs, pick your whole screen. Then I'll take a look.";
-  // Ambient loop keeps this fresh — answer instantly when it is. Window is wide
-  // (20s) because the self-hosted VLM runs on CPU, so a fresh cache beats waiting.
-  if (screenContext.text && Date.now() - screenContext.at < 20000) return screenContext.text;
-  try {
-    const text = await describeNow("Look at this screen. In two or three short spoken sentences, say what app or page it is and the main things on it. Plain speech, no lists.");
-    if (text === "___loading___") return "My eyes are just starting up. Give me a few seconds and ask me to look again.";
-    if (text === "___quota___") return "My vision has hit its limit for the moment. Give it a minute and ask me to look again.";
-    if (!text) return "I looked but couldn't quite make it out just then. Try me again.";
-    screenContext = { text, at: Date.now() };
-    return text;
-  } catch { return "My vision took too long just then. Give me a moment and ask me to look again."; }
+    return text || "I looked but couldn't tell what's there.";
+  } catch { return "I couldn't reach my vision just then."; }
 }
 
 /* ---------- Share screen ---------- */
 function stopScreen() {
-  if (screenLoop) { clearInterval(screenLoop); screenLoop = null; }
-  screenContext = { text: "", at: 0 }; lastSig = null; describeGen++;
   screenStream?.getTracks().forEach((t) => t.stop());
   screenStream = null;
   if (screenVideo) { screenVideo.srcObject = null; screenVideo.remove(); screenVideo = null; }
   if (screenBtn) screenBtn.textContent = "Share screen";
-  if (lookBtn) lookBtn.style.display = "none";
-  flashBanner("", 0);
 }
 async function toggleScreen() {
   if (screenStream) { stopScreen(); return; }
   try {
-    // Prefer a monitor surface so it follows the user across tabs and apps.
-    screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: 4, displaySurface: "monitor" },
-    });
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 4 } });
     screenBtn.textContent = "Stop sharing";
     screenVideo = document.createElement("video");
     screenVideo.srcObject = screenStream;
@@ -351,55 +270,11 @@ async function toggleScreen() {
     screenVideo.style.cssText = "position:fixed;left:-9999px;width:1px;height:1px";
     document.body.appendChild(screenVideo);
     await screenVideo.play().catch(() => {});
-    if (screenLoop) clearInterval(screenLoop);
-    // 8s tick; the in-flight guard + change-gating self-throttle to the CPU
-    // VLM's real pace, so this never backs up.
-    screenLoop = setInterval(screenTick, 8000);
+    // Nudge Pulse to look at the freshly shared screen.
+    client?.sendUserMessage?.("[The user just shared their screen. Call look_at_screen now, then tell them what you see.]");
     screenStream.getVideoTracks()[0].addEventListener("ended", stopScreen);
-    if (lookBtn) lookBtn.style.display = "block";
-    // DETERMINISTIC describe-on-share: don't rely on the LLM choosing to call a
-    // tool (which fails when the mic is noisy and utterances barge in). We look
-    // and make Pulse speak the result ourselves.
-    describeOnShare();
   } catch { setStatus("Screen share was cancelled."); }
 }
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function waitForFrame(maxMs = 3500) {
-  const t = Date.now();
-  while ((!screenVideo || !screenVideo.videoWidth) && Date.now() - t < maxMs) await sleep(150);
-  return !!(screenVideo && screenVideo.videoWidth);
-}
-// Flash a description on-screen too, so there's a visual channel even if the
-// avatar's audio gets barged by a noisy mic.
-function flashBanner(text, ms = 8000) {
-  const b = document.getElementById("action-banner");
-  if (!b) return;
-  b.textContent = text || "";
-  b.style.display = text ? "block" : "none";
-  b.style.background = "rgba(18,20,26,.94)";
-  b.style.color = "#e8ecf3";
-  b.style.border = "1px solid rgba(255,255,255,.16)";
-  b.style.whiteSpace = "normal";
-  b.style.maxWidth = "60vw";
-  clearTimeout(b._t);
-  if (ms) b._t = setTimeout(() => { b.style.display = "none"; }, ms);
-}
-let describeGen = 0;
-// Look at the screen and make Pulse SPEAK the result directly (client.talk),
-// bypassing the LLM tool-call path entirely. withAck adds a filler line to cover
-// a cold VLM's warm-up. Used on share and by the "What do you see?" button.
-async function speakScreen(withAck) {
-  const gen = ++describeGen;
-  flashBanner(withAck ? "Screen shared. Pulse is looking…" : "Pulse is looking…", 0);
-  if (withAck) { try { client?.talk?.("Alright, I can see your screen now. Give me a second to take a look."); } catch {} }
-  await waitForFrame();
-  const text = await lookAtScreen();
-  if (gen !== describeGen || !screenStream) return; // superseded by a newer look, or sharing stopped
-  flashBanner(text, 10000);
-  try { client?.talk?.(text); } catch (e) { console.error("[pulse] talk failed", e); }
-}
-function describeOnShare() { return speakScreen(true); }
 
 /* ---------- Companion mode (floating always-on-top window) ---------- */
 async function toggleCompanion() {
@@ -482,7 +357,6 @@ async function start() {
       setStatus("");
       enable(stopBtn, true); enable(screenBtn, true); enable(pipBtn, true);
       if (poster) poster.style.opacity = "0";
-      warmVision(); // prime the VLM so the first screen look is fast
       client.talk("I'm Pulse. Ask me anything and I'll go read the web and come back with the real answer, or share your screen and I'll tell you what I see.");
     });
     client.addListener(AnamEvent.CONNECTION_CLOSED, stop);
@@ -517,5 +391,4 @@ function stop() {
 startBtn?.addEventListener("click", start);
 stopBtn?.addEventListener("click", stop);
 screenBtn?.addEventListener("click", toggleScreen);
-lookBtn?.addEventListener("click", () => { if (screenStream) speakScreen(false); });
 pipBtn?.addEventListener("click", toggleCompanion);
