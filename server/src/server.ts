@@ -18,7 +18,7 @@ import { mintSessionToken, anamConfigFromEnv } from "./anam.js";
 import { describeScreen, planAction, visionConfigFromEnv } from "./vision.js";
 import { startRun, getFrame } from "./browser.js";
 import { search, readPage, searchConfigFromEnv } from "./research.js";
-import { writePrd } from "./generate.js";
+import { writePrd, writePrdStream } from "./generate.js";
 import type { FormField, Profile } from "./types.js";
 
 const PORT = Number(process.env.PORT || 8787);
@@ -279,6 +279,39 @@ const server = http.createServer(async (req, res) => {
       const rate = /RATE_LIMIT|\b429\b/.test(String(e?.message ?? ""));
       res.writeHead(rate ? 429 : 502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: rate ? "rate_limited" : "could not write the document just now" }));
     }
+    return;
+  }
+
+  // --- generate a PRD, streamed as Server-Sent Events (sources, tokens, done) ---
+  if (req.method === "POST" && req.url === "/prd-stream") {
+    let body: any = {};
+    try { body = JSON.parse((await readBody(req)) || "{}"); } catch { /* handled below */ }
+    const topic = String(body.topic || "").slice(0, 500);
+    const url = body.url ? String(body.url) : undefined;
+    if (!topic.trim() && !url) {
+      res.writeHead(400, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "topic or url required" }));
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+      ...cors,
+    });
+    const send = (event: string, data: unknown) => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+    try {
+      const out = await writePrdStream(topic || url!, url, {
+        onSources: (s) => send("sources", s),
+        onToken: (t) => send("token", { t }),
+      });
+      send("done", out);
+    } catch (e: any) {
+      console.error("[prd-stream]", e?.message ?? e);
+      const rate = /RATE_LIMIT|\b429\b/.test(String(e?.message ?? ""));
+      send("error", { error: rate ? "rate_limited" : "could not write the document" });
+    }
+    res.end();
     return;
   }
 

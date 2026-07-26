@@ -99,14 +99,20 @@ function renderReading(title, url, screenshot) {
   if (rpCaption) rpCaption.textContent = title ? `${title} — ${domainOf(url)}` : domainOf(url);
 }
 
-/* ---------- document panel (PRDs Pulse writes) ---------- */
-const docPanel = document.getElementById("doc-panel");
-const docTitle = document.getElementById("doc-title");
-const docBody = document.getElementById("doc-body");
-const docDownload = document.getElementById("doc-download");
-let currentDoc = null; // { title, markdown }
+/* ---------- files box (search results + PRDs Pulse writes) ----------
+ * A single state (fileStore) rendered to two surfaces: the main-page files box
+ * and, when open, a mirror inside the Companion (PiP) window. PRDs stream in
+ * live here — no modal — and become downloadable the instant they finish. */
+const filesBox = document.getElementById("files-box");
+const fbSources = document.getElementById("fb-sources");
+const fbDocs = document.getElementById("fb-docs");
+const fbSourcesWrap = document.getElementById("fb-sources-wrap");
+const fbDocsWrap = document.getElementById("fb-docs-wrap");
+let companionFb = null; // { sources, docs } elements in the Companion window, when open
+let docSeq = 0;
+const fileStore = { sources: [], docs: [] }; // docs: {id,label,markdown,done,error,sources}
 
-function escHtml(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function escHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
 function mdToHtml(md) {
   const inline = (t) => t
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
@@ -127,51 +133,104 @@ function mdToHtml(md) {
   return html;
 }
 function slug(s) { return (s || "prd").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "prd"; }
-function openDoc(loadingText) {
-  docPanel?.classList.add("show");
-  if (docTitle) docTitle.textContent = "Working on it…";
-  if (docBody) docBody.innerHTML = `<p class="doc-loading">${escHtml(loadingText || "Researching and writing…")}</p>`;
-  if (docDownload) docDownload.style.display = "none";
+
+function sourcesHtml(list) {
+  if (!list || !list.length) return "";
+  return list.map((r) =>
+    `<a class="fb-source" href="${escHtml(r.url)}" target="_blank" rel="noopener">` +
+    `<span class="fb-source-title">${escHtml(r.title || r.url)}</span>` +
+    `<span class="fb-source-domain">${escHtml(domainOf(r.url))}</span></a>`).join("");
 }
-function renderDoc(doc) {
-  currentDoc = doc;
-  docPanel?.classList.add("show");
-  if (docTitle) docTitle.textContent = doc.title;
-  if (docBody) {
-    let html = mdToHtml(doc.markdown);
-    if (Array.isArray(doc.sources) && doc.sources.length) {
-      html += `<h2>Sources</h2><ul>` + doc.sources.map((s) => `<li><a href="${escHtml(s.url)}" target="_blank" rel="noopener">${escHtml(s.title || s.url)}</a></li>`).join("") + `</ul>`;
-    }
-    docBody.innerHTML = html;
-    docBody.scrollTop = 0;
-  }
-  if (docDownload) docDownload.style.display = "inline-block";
+function docsHtml() {
+  return fileStore.docs.map((d) => {
+    const action = d.done && !d.error
+      ? `<button class="fb-dl" data-id="${d.id}">Download .md</button>`
+      : `<span class="fb-writing">${d.error ? "" : "writing…"}</span>`;
+    const body = d.error ? `<p class="fb-err">${escHtml(d.error)}</p>`
+      : (d.markdown ? mdToHtml(d.markdown) : `<p class="fb-writing">researching the web…</p>`);
+    const srcs = (d.done && d.sources && d.sources.length)
+      ? `<div class="fb-doc-sources">Sources: ${d.sources.map((s) => `<a href="${escHtml(s.url)}" target="_blank" rel="noopener">${escHtml(domainOf(s.url))}</a>`).join(", ")}</div>` : "";
+    return `<div class="fb-doc" data-id="${d.id}"><div class="fb-doc-head"><span class="fb-doc-title">${escHtml(d.label)}</span>${action}</div><div class="fb-doc-body">${body}</div>${srcs}</div>`;
+  }).join("");
 }
-docDownload?.addEventListener("click", () => {
-  if (!currentDoc) return;
-  const blob = new Blob([currentDoc.markdown], { type: "text/markdown" });
+function renderFiles() {
+  const sHtml = sourcesHtml(fileStore.sources);
+  const dHtml = docsHtml();
+  if (fbSources) fbSources.innerHTML = sHtml;
+  if (fbDocs) fbDocs.innerHTML = dHtml;
+  if (fbSourcesWrap) fbSourcesWrap.style.display = fileStore.sources.length ? "block" : "none";
+  if (fbDocsWrap) fbDocsWrap.style.display = fileStore.docs.length ? "block" : "none";
+  if (companionFb) { companionFb.sources.innerHTML = sHtml; companionFb.docs.innerHTML = dHtml; }
+  scrollStreaming(fbDocs); if (companionFb) scrollStreaming(companionFb.docs);
+}
+function scrollStreaming(container) {
+  if (!container) return;
+  const s = fileStore.docs.find((d) => !d.done);
+  if (!s) return;
+  const el = container.querySelector(`.fb-doc[data-id="${s.id}"] .fb-doc-body`);
+  if (el) el.scrollTop = el.scrollHeight;
+}
+function showFiles() { if (filesBox) filesBox.classList.add("show"); }
+function downloadDoc(id) {
+  const d = fileStore.docs.find((x) => x.id === id);
+  if (!d || !d.done || d.error) return;
+  const blob = new Blob([d.markdown], { type: "text/markdown" });
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob); a.download = slug(currentDoc.title) + ".md";
+  a.href = URL.createObjectURL(blob); a.download = slug(d.label) + ".md";
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-});
-document.getElementById("doc-close")?.addEventListener("click", () => docPanel?.classList.remove("show"));
+}
+function announce(text) { try { client?.talk?.(text); } catch (e) { console.error("[pulse] announce", e); } }
 
-async function buildPrd(topic, url) {
+fbDocs?.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest(".fb-dl"); if (b) downloadDoc(b.dataset.id); });
+document.getElementById("fb-close")?.addEventListener("click", () => filesBox?.classList.remove("show"));
+
+let renderTimer = null;
+function throttledRender() { if (renderTimer) return; renderTimer = setTimeout(() => { renderTimer = null; renderFiles(); }, 200); }
+
+// Non-blocking: streams a PRD into the files box in the background. Pulse keeps
+// chatting; we announce when it is ready (or if it fell over).
+async function startPrdStream(topic, url) {
   topic = (topic || "").trim();
-  if (!topic && !url) return "Tell me what you'd like a PRD for and I'll research it and write one.";
-  openDoc(`Researching and writing a PRD for ${topic || url}. This takes a few seconds…`);
-  let data;
+  const id = "d" + (++docSeq);
+  const doc = { id, label: topic ? `PRD — ${topic}` : "PRD", markdown: "", done: false, error: null, sources: [] };
+  fileStore.docs.unshift(doc);
+  showFiles(); renderFiles();
   try {
-    const res = await fetch(`${BRAIN}/prd`, {
+    const res = await fetch(`${BRAIN}/prd-stream`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ topic, url }),
     });
-    if (res.status === 429) { docPanel?.classList.remove("show"); return "I've hit my writing limit for the moment. Give it a minute and ask me again."; }
-    if (!res.ok) { docPanel?.classList.remove("show"); return "I couldn't write that document just now. Give me another go in a moment."; }
-    data = await res.json();
-  } catch { docPanel?.classList.remove("show"); return "I couldn't reach my writing tools just then."; }
-  renderDoc(data);
-  return `Your PRD, "${data.title}", is ready on screen and you can download it. It lays out the problem, the users, the key features with priorities, the requirements, milestones, risks, and success metrics. Want me to expand or change any part?`;
+    if (res.status === 429) { doc.error = "Writing limit hit. Try again in a minute."; doc.done = true; renderFiles(); announce("I hit my writing limit for a moment, so I could not finish that document. Ask me again shortly."); return; }
+    if (!res.ok || !res.body) { doc.error = "Could not write that just now."; doc.done = true; renderFiles(); announce("I could not write that document just now."); return; }
+    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = ""; let evt = null;
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).replace(/\r$/, ""); buf = buf.slice(nl + 1);
+        if (line.startsWith("event:")) evt = line.slice(6).trim();
+        else if (line.startsWith("data:")) {
+          const data = line.slice(5).trim();
+          try {
+            const j = JSON.parse(data);
+            if (evt === "sources") { doc.sources = j || []; throttledRender(); }
+            else if (evt === "token") { doc.markdown += j.t || ""; throttledRender(); }
+            else if (evt === "done") {
+              doc.markdown = j.markdown || doc.markdown; doc.label = j.title || doc.label; doc.sources = j.sources || doc.sources; doc.done = true;
+              if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+              renderFiles();
+              announce(`Your PRD titled ${j.title} is ready in the files box, and you can download it now. Want me to change anything in it?`);
+            } else if (evt === "error") {
+              doc.error = j.error === "rate_limited" ? "Writing limit hit. Try again shortly." : "Something went wrong writing that."; doc.done = true; renderFiles();
+              announce("I ran into a snag finishing that document.");
+            }
+          } catch { /* keep-alive or partial line */ }
+        } else if (line === "") evt = null;
+      }
+    }
+    if (!doc.done) { doc.done = true; renderFiles(); }
+  } catch (e) { console.error("[pulse] prd-stream", e); doc.error = "Lost the connection while writing."; doc.done = true; renderFiles(); announce("I lost the connection while writing that document."); }
 }
 
 /* ---------- the three research tools ---------- */
@@ -192,7 +251,8 @@ async function webSearch(query) {
     data = await res.json();
   } catch { return "I couldn't reach the web just then. Give me a moment and ask again."; }
   const results = Array.isArray(data.results) ? data.results : [];
-  renderResults(query, results);
+  renderResults(query, results);           // main page (research panel)
+  if (results.length) { fileStore.sources = results; showFiles(); renderFiles(); } // + files box
   if (rpStatus) rpStatus.textContent = results.length ? `Found ${results.length} sources for ${query}.` : `Nothing solid for ${query}.`;
   if (!results.length && !data.answer) return `I searched for ${query} but didn't find anything solid. Want me to try different words?`;
   let digest = `Web search results for "${query}":\n`;
@@ -276,21 +336,60 @@ async function toggleScreen() {
   } catch { setStatus("Screen share was cancelled."); }
 }
 
-/* ---------- Companion mode (floating always-on-top window) ---------- */
+/* ---------- Companion mode (floating window: avatar + files box) ---------- */
+// PiP is a SEPARATE document, so its styles must be injected inline here.
+const COMPANION_CSS = `
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#050505;color:#e8ecf3;font-family:system-ui,-apple-system,sans-serif;display:flex;flex-direction:column;height:100%;overflow:hidden}
+  .cp-vid{flex:0 0 46%;position:relative;background:#050505}
+  .cp-vid video{width:100%;height:100%;object-fit:cover}
+  .cp-files{flex:1;overflow-y:auto;padding:10px 12px;border-top:1px solid rgba(255,255,255,.12);background:rgba(8,9,12,.6)}
+  .cp-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#7fb0ff;margin:2px 0 6px}
+  .fb-source{display:block;text-decoration:none;padding:6px 8px;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);margin-bottom:6px}
+  .fb-source-title{display:block;font-size:12px;font-weight:600;color:#eef2f7;line-height:1.3}
+  .fb-source-domain{display:block;font-size:10px;color:#7fb0ff;margin-top:1px}
+  .fb-doc{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:10px;padding:8px 10px;margin-bottom:8px}
+  .fb-doc-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
+  .fb-doc-title{font-size:12px;font-weight:700;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fb-dl{background:#78b4ff;color:#06111f;border:none;border-radius:999px;padding:4px 10px;font:inherit;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .fb-writing{font-size:11px;color:#9fb4d0;font-style:italic;white-space:nowrap}
+  .fb-doc-body{max-height:180px;overflow-y:auto;font-size:11.5px;line-height:1.5;color:#dfe1e6}
+  .fb-doc-body h1{font-size:14px;color:#fff;margin:0 0 5px}
+  .fb-doc-body h2{font-size:12px;color:#cfe2ff;margin:9px 0 3px}
+  .fb-doc-body h3{font-size:11.5px;color:#eef2f7;margin:6px 0 2px}
+  .fb-doc-body p{margin:0 0 5px}
+  .fb-doc-body ul{margin:0 0 6px;padding-left:16px}
+  .fb-doc-body strong{color:#fff}
+  .fb-doc-sources{font-size:10px;color:#8aa0bd;margin-top:5px}
+  .fb-doc-sources a{color:#7fb0ff}
+  .fb-err{color:#e88;font-size:11.5px}
+  .cp-empty{font-size:11px;color:#8090a5;font-style:italic;padding:6px 2px}
+`;
 async function toggleCompanion() {
   if (!("documentPictureInPicture" in window)) { setStatus("Companion mode needs a Chromium browser."); return; }
   if (companionWin && !companionWin.closed) { companionWin.close(); return; }
-  companionWin = await window.documentPictureInPicture.requestWindow({ width: 300, height: 380 });
+  companionWin = await window.documentPictureInPicture.requestWindow({ width: 340, height: 560 });
   const d = companionWin.document;
-  d.documentElement.style.cssText = "height:100%";
-  d.body.style.cssText = "margin:0;height:100%;background:#050505;overflow:hidden";
+  d.documentElement.style.height = "100%";
+  const st = d.createElement("style"); st.textContent = COMPANION_CSS; d.head.appendChild(st);
+
+  const vidWrap = d.createElement("div"); vidWrap.className = "cp-vid";
   const pipVideo = d.createElement("video");
   pipVideo.autoplay = true; pipVideo.playsInline = true; pipVideo.muted = true;
   pipVideo.srcObject = videoEl.srcObject;
-  pipVideo.style.cssText = "position:fixed;inset:0;width:100%;height:100%;object-fit:cover";
-  d.body.append(pipVideo);
+  vidWrap.appendChild(pipVideo); d.body.appendChild(vidWrap);
   await pipVideo.play().catch(() => {});
-  companionWin.addEventListener("pagehide", () => { pipVideo.srcObject = null; });
+
+  const files = d.createElement("div"); files.className = "cp-files";
+  files.innerHTML =
+    `<div class="cp-h">Search results</div><div class="cp-sources"></div>` +
+    `<div class="cp-h" style="margin-top:10px">Documents</div><div class="cp-docs"></div>`;
+  d.body.appendChild(files);
+  companionFb = { sources: files.querySelector(".cp-sources"), docs: files.querySelector(".cp-docs") };
+  companionFb.docs.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest(".fb-dl"); if (b) downloadDoc(b.dataset.id); });
+  renderFiles();
+
+  companionWin.addEventListener("pagehide", () => { pipVideo.srcObject = null; companionFb = null; });
 }
 
 /* ---------- session lifecycle ---------- */
@@ -337,11 +436,14 @@ async function start() {
       });
       client.registerToolCallHandler?.("build_prd", {
         onStart: async (p) => {
-          const topic = p?.arguments?.topic ?? "";
-          const url = p?.arguments?.url ?? "";
+          const topic = String(p?.arguments?.topic ?? "").trim();
+          const url = String(p?.arguments?.url ?? "").trim();
           console.log("[pulse] build_prd", topic, url);
-          try { return await buildPrd(String(topic), String(url)); }
-          catch (e) { console.error("[pulse] build_prd", e); return "Something went wrong writing that document."; }
+          if (!topic && !url) return "Tell me what you'd like a PRD for and I'll get started on it.";
+          // Kick off streaming in the BACKGROUND (do not await) so Pulse stays
+          // free to keep chatting. We announce ourselves when it's ready.
+          startPrdStream(topic, url);
+          return "I've started building that PRD in the background. You can keep chatting with me about anything while I work, and I'll let you know the moment it's ready to download.";
         },
       });
       client.registerToolCallHandler?.("look_at_screen", {

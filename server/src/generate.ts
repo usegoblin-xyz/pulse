@@ -42,6 +42,59 @@ async function generateText(system: string, user: string, maxTokens = 6000): Pro
   return data?.choices?.[0]?.message?.content ?? "";
 }
 
+// Streaming generation: parse the OpenAI-compatible SSE and hand each text
+// delta to onToken as it arrives. Returns the full text at the end.
+async function generateTextStream(
+  system: string,
+  user: string,
+  onToken: (t: string) => void,
+  maxTokens = 6000,
+): Promise<string> {
+  const cfg = genConfigFromEnv();
+  if (!cfg.apiKey) throw new Error("generation not configured (no gen/vision key)");
+  const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },
+    body: JSON.stringify({
+      model: cfg.model,
+      temperature: 0.4,
+      max_tokens: maxTokens,
+      stream: true,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    }),
+  });
+  if (res.status === 429) throw new Error("RATE_LIMIT");
+  if (!res.ok) throw new Error(`generate ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.body) return generateText(system, user, maxTokens); // no stream support -> fallback
+
+  let full = "";
+  const reader = (res.body as any).getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (data === "[DONE]") continue;
+      try {
+        const j = JSON.parse(data);
+        const t = j?.choices?.[0]?.delta?.content;
+        if (t) { full += t; onToken(t); }
+      } catch { /* keep-alive or partial line */ }
+    }
+  }
+  return full;
+}
+
 const PRD_SYSTEM = `You are a senior product manager who writes crisp, buildable product requirements documents (PRDs). You write in clean Markdown. Given a product idea or a reference to research, produce a COMPLETE, detailed PRD a small team could start building from.
 
 Always use exactly these sections, as level-two Markdown headings, in this order:
@@ -63,14 +116,16 @@ Rules:
 - Ground the document in the research context provided. If the context shows what real products in this space do, reflect and improve on it. Do not invent fake statistics or fake sources.
 - Be thorough and opinionated. Prefer specifics over hand-waving. No preamble, no closing remarks, start directly with the title as a level-one heading (# ...).`;
 
-export interface PrdResult { title: string; markdown: string; sources: Array<{ title: string; url: string }>; }
+export interface PrdSource { title: string; url: string; }
+export interface PrdResult { title: string; markdown: string; sources: PrdSource[]; }
 
-export async function writePrd(topic: string, url?: string): Promise<PrdResult> {
-  const sources: Array<{ title: string; url: string }> = [];
+// Shared grounding: read a pointed-at page and/or search the topic, returning the
+// research context string and the sources list.
+async function gatherPrdContext(topic: string, url?: string): Promise<{ context: string; sources: PrdSource[] }> {
+  const sources: PrdSource[] = [];
   let context = "";
 
   if (url && /^https?:\/\//.test(url)) {
-    // Point-at-a-page: read it and build the PRD from what it describes.
     try {
       const page = await readPage(url);
       sources.push({ title: page.title, url: page.url });
@@ -78,7 +133,6 @@ export async function writePrd(topic: string, url?: string): Promise<PrdResult> 
     } catch { /* fall back to search-only grounding */ }
   }
 
-  // Always ground with a live web search on the topic, and read the top hit for depth.
   try {
     const found = await search(topic, searchConfigFromEnv(), 5);
     for (const r of found.results.slice(0, 5)) {
@@ -92,13 +146,33 @@ export async function writePrd(topic: string, url?: string): Promise<PrdResult> 
     }
   } catch { /* generation can still proceed from the topic alone */ }
 
-  const user =
-    `Product idea / topic: ${topic}\n\n` +
-    (context ? `Research context you must ground the PRD in:\n\n${context}` : `No research context was available; write the PRD from the topic and your product judgment.`);
+  return { context, sources };
+}
 
-  const markdown = (await generateText(PRD_SYSTEM, user)).trim();
-  // Pull the title from the leading # heading, else fall back to the topic.
+function prdUserPrompt(topic: string, context: string): string {
+  return `Product idea / topic: ${topic}\n\n` +
+    (context ? `Research context you must ground the PRD in:\n\n${context}` : `No research context was available; write the PRD from the topic and your product judgment.`);
+}
+
+function titleFrom(markdown: string, topic: string): string {
   const m = markdown.match(/^#\s+(.+)$/m);
-  const title = (m ? m[1] : `PRD: ${topic}`).trim();
-  return { title, markdown, sources };
+  return (m ? m[1] : `PRD: ${topic}`).trim();
+}
+
+export async function writePrd(topic: string, url?: string): Promise<PrdResult> {
+  const { context, sources } = await gatherPrdContext(topic, url);
+  const markdown = (await generateText(PRD_SYSTEM, prdUserPrompt(topic, context))).trim();
+  return { title: titleFrom(markdown, topic), markdown, sources };
+}
+
+// Streaming variant: research first (onSources), then stream the doc (onToken).
+export async function writePrdStream(
+  topic: string,
+  url: string | undefined,
+  hooks: { onSources: (s: PrdSource[]) => void; onToken: (t: string) => void },
+): Promise<PrdResult> {
+  const { context, sources } = await gatherPrdContext(topic, url);
+  hooks.onSources(sources);
+  const markdown = (await generateTextStream(PRD_SYSTEM, prdUserPrompt(topic, context), hooks.onToken)).trim();
+  return { title: titleFrom(markdown, topic), markdown, sources };
 }
