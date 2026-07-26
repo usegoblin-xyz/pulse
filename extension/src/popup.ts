@@ -40,4 +40,20 @@ $<HTMLButtonElement>("fill").addEventListener("click", async () => {
   status(`Filled ${res.applied ?? 0} field(s). Nothing was submitted.${askLine}`, "ok");
 });
 
+// Hands-free = the broad "fill on any site" access, requested only when the
+// user opts in (keeps the install minimal for Chrome review).
+const BROAD: chrome.permissions.Permissions = { permissions: ["tabs"], origins: ["https://*/*", "http://*/*"] };
+async function refreshHandsFree() {
+  const on = await chrome.permissions.contains({ origins: ["https://*/*", "http://*/*"] });
+  const btn = $<HTMLButtonElement>("handsfree");
+  btn.textContent = on ? "Hands-free fill is on ✓" : "Enable hands-free fill on any site";
+  btn.disabled = on;
+}
+$<HTMLButtonElement>("handsfree").addEventListener("click", async () => {
+  const granted = await chrome.permissions.request(BROAD);
+  if (granted) { status("Hands-free enabled — Pulse can fill by voice now.", "ok"); refreshHandsFree(); }
+  else status("Left off. You can still fill from this popup.", "info");
+});
+
 load();
+refreshHandsFree();

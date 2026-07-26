@@ -1,13 +1,23 @@
 {
   "manifest_version": 3,
-  "name": "Pulse",
-  "version": "0.1.0",
+  "name": "Pulse — form autofill",
+  "version": "0.2.0",
   "description": "Fills web forms from your own saved details. Reads the page, fills what it can, and never submits for you.",
+  "icons": { "16": "icons/icon-16.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["http://localhost:8787/*"],
+  "optional_permissions": ["tabs"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": {
     "default_title": "Pulse — fill this form",
-    "default_popup": "popup.html"
-  }
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/icon-16.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://pulse-demo.fly.dev/*", "http://localhost:8787/*"],
+      "js": ["relay.js"],
+      "run_at": "document_start"
+    }
+  ]
 }

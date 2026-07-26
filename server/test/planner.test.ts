@@ -85,13 +85,37 @@ test("GUARDRAIL: sensitive fields are never sent to the model and never filled",
 });
 
 test("GUARDRAIL: sensitive-looking profile keys are scrubbed before the model sees them", async () => {
-  const fields = [F("f1", { label: "Full name" })];
+  // "Nickname" isn't a heuristic-mappable field, so the model IS consulted here.
+  const fields = [F("f1", { label: "Nickname" })];
   const { client, seen } = mockModel(JSON.stringify({ fills: [{ fieldId: "f1", value: "Ada" }] }));
-  await planFill(fields, { fullName: "Ada", ssn: "078-05-1120", cardNumber: "4111111111111111" }, client);
+  await planFill(fields, { nickname: "Ada", ssn: "078-05-1120", cardNumber: "4111111111111111" }, client);
   const sent = seen.map((s) => s.user).join("\n");
   assert.ok(sent.includes("Ada"), "safe profile value should be sent");
   assert.ok(!sent.includes("078-05-1120"), "SSN profile value leaked to model");
   assert.ok(!sent.includes("4111111111111111"), "card profile value leaked to model");
+});
+
+test("heuristic fills standard fields with NO model (keyless)", async () => {
+  const fields = [
+    F("f1", { label: "Email", type: "email" }),
+    F("f2", { label: "Full name" }),
+    F("f3", { label: "Phone", autocomplete: "tel" }),
+    F("f4", { label: "City" }),
+  ];
+  const plan = await planFill(
+    fields,
+    { email: "a@b.com", fullName: "Ada Lovelace", phone: "555-1212", city: "London" },
+    null, // no model configured
+  );
+  assert.deepEqual(
+    plan.fills.slice().sort((a, b) => a.fieldId.localeCompare(b.fieldId)),
+    [
+      { fieldId: "f1", value: "a@b.com" },
+      { fieldId: "f2", value: "Ada Lovelace" },
+      { fieldId: "f3", value: "555-1212" },
+      { fieldId: "f4", value: "London" },
+    ],
+  );
 });
 
 test("select values must be one of the real options", async () => {

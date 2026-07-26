@@ -6,7 +6,7 @@ import type { Profile } from "./types.js";
 
 const PROFILE_KEY = "pulse.profile";
 const BRAIN_KEY = "pulse.brainUrl";
-const DEFAULT_BRAIN = "http://localhost:8787";
+const DEFAULT_BRAIN = "https://pulse-demo.fly.dev";
 
 export async function getProfile(): Promise<Profile> {
   const got = await chrome.storage.local.get(PROFILE_KEY);
