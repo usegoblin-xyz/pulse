@@ -8,6 +8,12 @@ primary_region = "iad"
 [build]
   dockerfile = "Dockerfile"
 
+[env]
+  # Bind IPv6 dual-stack: Fly's private 6PN network (how pulse-demo reaches this
+  # app at .internal) is IPv6, so listening on 0.0.0.0 alone refuses those
+  # connections. "::" with Linux's default dual-stack also accepts IPv4 (health check).
+  LLAMA_ARG_HOST = "::"
+
 # No [http_service] on purpose: that is the PUBLIC edge. Without it (and with the
 # public IPs released) the machine still runs and listens on 8080, reachable only
 # via 6PN (.internal). The machine runs continuously (no autostop configured).
