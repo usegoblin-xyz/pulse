@@ -1,0 +1,30 @@
+# Pulse's self-hosted vision model (SmolVLM2-2.2B via llama.cpp). PRIVATE app:
+# no public service and no public IPs — it is reachable ONLY over Fly's private
+# 6PN network at pulse-vlm.internal:8080, which the brain (pulse-demo, same org)
+# calls. Single always-warm machine; CPU inference, no external API.
+app = "pulse-vlm"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# No [http_service] on purpose: that is the PUBLIC edge. Without it (and with the
+# public IPs released) the machine still runs and listens on 8080, reachable only
+# via 6PN (.internal). The machine runs continuously (no autostop configured).
+
+# Machine health check so a hung server gets restarted even without a public service.
+[checks]
+  [checks.health]
+    type = "http"
+    port = 8080
+    method = "get"
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "180s"
+
+[[vm]]
+  # 2 dedicated vCPUs for predictable inference latency; 4GB holds the weights
+  # (~1.7GB) plus llama.cpp's compute buffers with headroom.
+  size = "performance-2x"
+  memory = "4096mb"

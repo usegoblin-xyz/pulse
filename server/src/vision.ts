@@ -11,10 +11,12 @@ export interface VisionConfig {
 }
 
 export function visionConfigFromEnv(env = process.env): VisionConfig {
+  // Prefer the self-hosted VLM (PULSE_VLM_*, our moondream2 on Fly) for seeing
+  // the screen; fall back to the legacy PULSE_VISION_* if the VLM isn't set.
   return {
-    baseUrl: (env.PULSE_VISION_BASE_URL || "https://api.z.ai/api/paas/v4").replace(/\/$/, ""),
-    apiKey: env.PULSE_VISION_API_KEY || "",
-    model: env.PULSE_VISION_MODEL || "glm-4.6v",
+    baseUrl: (env.PULSE_VLM_BASE_URL || env.PULSE_VISION_BASE_URL || "https://api.z.ai/api/paas/v4").replace(/\/$/, ""),
+    apiKey: env.PULSE_VLM_API_KEY || env.PULSE_VISION_API_KEY || "",
+    model: env.PULSE_VLM_MODEL || env.PULSE_VISION_MODEL || "glm-4.6v",
   };
 }
 

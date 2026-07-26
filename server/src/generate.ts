@@ -4,12 +4,23 @@
 // prose here instead of reading an image.
 
 import { search, readPage, searchConfigFromEnv } from "./research.js";
-import { visionConfigFromEnv } from "./vision.js";
 
-// A plain text generation over an OpenAI-compatible endpoint (Gemini by default).
+// PRD writing needs a capable TEXT model, which the self-hosted vision VLM
+// (moondream) is not. So generation reads its own config: PULSE_GEN_* if set,
+// else the legacy PULSE_VISION_* (a hosted text/multimodal model). It never uses
+// PULSE_VLM_*, so pointing vision at moondream doesn't break document writing.
+function genConfigFromEnv(env = process.env) {
+  return {
+    baseUrl: (env.PULSE_GEN_BASE_URL || env.PULSE_VISION_BASE_URL || "https://api.z.ai/api/paas/v4").replace(/\/$/, ""),
+    apiKey: env.PULSE_GEN_API_KEY || env.PULSE_VISION_API_KEY || "",
+    model: env.PULSE_GEN_MODEL || env.PULSE_VISION_MODEL || "glm-4.6-flash",
+  };
+}
+
+// A plain text generation over an OpenAI-compatible endpoint.
 async function generateText(system: string, user: string, maxTokens = 6000): Promise<string> {
-  const cfg = visionConfigFromEnv(); // Gemini base URL + key + model
-  if (!cfg.apiKey) throw new Error("generation not configured (no vision/model key)");
+  const cfg = genConfigFromEnv();
+  if (!cfg.apiKey) throw new Error("generation not configured (no gen/vision key)");
   const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },

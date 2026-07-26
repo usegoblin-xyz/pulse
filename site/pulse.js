@@ -295,8 +295,9 @@ async function screenTick() {
 
 async function lookAtScreen() {
   if (!screenStream) return "You haven't shared your screen yet. Click Share screen, and for me to follow you across tabs, pick your whole screen. Then I'll take a look.";
-  // Ambient loop keeps this fresh — answer instantly when it is.
-  if (screenContext.text && Date.now() - screenContext.at < 8000) return screenContext.text;
+  // Ambient loop keeps this fresh — answer instantly when it is. Window is wide
+  // (20s) because the self-hosted VLM runs on CPU, so a fresh cache beats waiting.
+  if (screenContext.text && Date.now() - screenContext.at < 20000) return screenContext.text;
   try {
     const text = await describeNow("Look at this screen. In two or three short spoken sentences, say what app or page it is and the main things on it. Plain speech, no lists.");
     if (text === "___novision___") return "My eyes aren't switched on yet. My vision needs a key added in settings.";
@@ -333,8 +334,9 @@ async function toggleScreen() {
     // Warm the first read, then keep sight fresh in the background.
     screenTick();
     if (screenLoop) clearInterval(screenLoop);
-    // 6s + change-gating + quota backoff keeps well under the vision rate limit.
-    screenLoop = setInterval(screenTick, 6000);
+    // 8s tick; the in-flight guard + change-gating self-throttle to the CPU
+    // VLM's real pace, so this never backs up.
+    screenLoop = setInterval(screenTick, 8000);
     client?.sendUserMessage?.("[The user just shared their screen and you can now see it continuously, including as they change tabs. Call look_at_screen now, tell them what you see, and if they shared only one tab, remind them once they can share their whole screen so you can follow along.]");
     screenStream.getVideoTracks()[0].addEventListener("ended", stopScreen);
   } catch { setStatus("Screen share was cancelled."); }

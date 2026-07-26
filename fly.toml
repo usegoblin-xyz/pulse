@@ -7,8 +7,13 @@ primary_region = "iad"
   dockerfile = "Dockerfile"
 
 [env]
-  # Pulse's vision runs through Google Gemini's OpenAI-compatible endpoint
-  # (generous free tier). The API key is the secret PULSE_VISION_API_KEY.
+  # Pulse's EYES: the self-hosted SmolVLM2 VLM (app pulse-vlm), reached over Fly's
+  # private 6PN network — never exposed publicly. No API fees, no rate limits.
+  # Auth is the secret PULSE_VLM_API_KEY (defense-in-depth on top of the private net).
+  PULSE_VLM_BASE_URL = "http://pulse-vlm.internal:8080/v1"
+  PULSE_VLM_MODEL = "smolvlm"
+  # Pulse's WRITING (PRDs) still uses a hosted text model via the OpenAI-compatible
+  # endpoint below; the VLM can't write documents. Key is secret PULSE_VISION_API_KEY.
   PULSE_VISION_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
   PULSE_VISION_MODEL = "gemini-flash-latest"
 
