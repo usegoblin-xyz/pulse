@@ -220,7 +220,8 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "application/json", ...cors }).end(JSON.stringify({ text }));
     } catch (e: any) {
       console.error("[see]", e?.message ?? e);
-      res.writeHead(502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not read the screen" }));
+      const rate = /\b429\b/.test(String(e?.message ?? ""));
+      res.writeHead(rate ? 429 : 502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: rate ? "rate_limited" : "could not read the screen" }));
     }
     return;
   }
@@ -275,7 +276,8 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "application/json", ...cors }).end(JSON.stringify(out));
     } catch (e: any) {
       console.error("[prd]", e?.message ?? e);
-      res.writeHead(502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not write the document just now" }));
+      const rate = /RATE_LIMIT|\b429\b/.test(String(e?.message ?? ""));
+      res.writeHead(rate ? 429 : 502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: rate ? "rate_limited" : "could not write the document just now" }));
     }
     return;
   }

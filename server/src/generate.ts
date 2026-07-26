@@ -7,7 +7,7 @@ import { search, readPage, searchConfigFromEnv } from "./research.js";
 import { visionConfigFromEnv } from "./vision.js";
 
 // A plain text generation over an OpenAI-compatible endpoint (Gemini by default).
-async function generateText(system: string, user: string, maxTokens = 4000): Promise<string> {
+async function generateText(system: string, user: string, maxTokens = 6000): Promise<string> {
   const cfg = visionConfigFromEnv(); // Gemini base URL + key + model
   if (!cfg.apiKey) throw new Error("generation not configured (no vision/model key)");
   const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
@@ -16,6 +16,8 @@ async function generateText(system: string, user: string, maxTokens = 4000): Pro
     body: JSON.stringify({
       model: cfg.model,
       temperature: 0.4,
+      // Generous: a full PRD plus the model's hidden reasoning must both fit,
+      // or the answer comes back truncated or empty.
       max_tokens: maxTokens,
       messages: [
         { role: "system", content: system },
@@ -23,6 +25,7 @@ async function generateText(system: string, user: string, maxTokens = 4000): Pro
       ],
     }),
   });
+  if (res.status === 429) throw new Error("RATE_LIMIT");
   if (!res.ok) throw new Error(`generate ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data: any = await res.json();
   return data?.choices?.[0]?.message?.content ?? "";

@@ -29,6 +29,7 @@ let screenLoop = null;
 let lastSig = null;
 let describing = false;
 let screenContext = { text: "", at: 0 };
+let visionPausedUntil = 0; // set when vision is rate-limited, to stop hammering
 const AMBIENT_PROMPT =
   "In one or two short sentences, say what app or web page is on screen right now and the main things visible on it. Plain text, no lists.";
 
@@ -175,6 +176,7 @@ async function buildPrd(topic, url) {
     const res = await fetch(`${BRAIN}/prd`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ topic, url }),
     });
+    if (res.status === 429) { docPanel?.classList.remove("show"); return "I've hit my writing limit for the moment. Give it a minute and ask me again."; }
     if (!res.ok) { docPanel?.classList.remove("show"); return "I couldn't write that document just now. Give me another go in a moment."; }
     data = await res.json();
   } catch { docPanel?.classList.remove("show"); return "I couldn't reach my writing tools just then."; }
@@ -269,6 +271,7 @@ async function describeNow(prompt) {
     body: JSON.stringify({ image, question: prompt }),
   });
   if (res.status === 503) return "___novision___";
+  if (res.status === 429) { visionPausedUntil = Date.now() + 60000; return "___quota___"; } // back off a minute
   if (!res.ok) return null;
   const { text } = await res.json();
   return text || null;
@@ -277,7 +280,7 @@ async function describeNow(prompt) {
 // Runs every few seconds while sharing. Silent — it just keeps screenContext
 // fresh so Pulse always has current sight without narrating every change.
 async function screenTick() {
-  if (!screenStream || describing) return;
+  if (!screenStream || describing || Date.now() < visionPausedUntil) return;
   const sig = screenSignature();
   const changed = sigChanged(sig);
   if (sig) lastSig = sig;
@@ -286,7 +289,7 @@ async function screenTick() {
   describing = true;
   try {
     const text = await describeNow(AMBIENT_PROMPT);
-    if (text && text !== "___novision___") screenContext = { text, at: Date.now() };
+    if (text && text !== "___novision___" && text !== "___quota___") screenContext = { text, at: Date.now() };
   } catch { /* keep the last good context */ } finally { describing = false; }
 }
 
@@ -297,6 +300,7 @@ async function lookAtScreen() {
   try {
     const text = await describeNow("Look at this screen. In two or three short spoken sentences, say what app or page it is and the main things on it. Plain speech, no lists.");
     if (text === "___novision___") return "My eyes aren't switched on yet. My vision needs a key added in settings.";
+    if (text === "___quota___") return "My vision has hit its limit for the moment. Give it a minute and ask me to look again.";
     if (!text) return "I looked but couldn't quite make it out just then.";
     screenContext = { text, at: Date.now() };
     return text;
@@ -329,7 +333,8 @@ async function toggleScreen() {
     // Warm the first read, then keep sight fresh in the background.
     screenTick();
     if (screenLoop) clearInterval(screenLoop);
-    screenLoop = setInterval(screenTick, 4000);
+    // 6s + change-gating + quota backoff keeps well under the vision rate limit.
+    screenLoop = setInterval(screenTick, 6000);
     client?.sendUserMessage?.("[The user just shared their screen and you can now see it continuously, including as they change tabs. Call look_at_screen now, tell them what you see, and if they shared only one tab, remind them once they can share their whole screen so you can follow along.]");
     screenStream.getVideoTracks()[0].addEventListener("ended", stopScreen);
   } catch { setStatus("Screen share was cancelled."); }
