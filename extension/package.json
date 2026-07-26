@@ -7,7 +7,8 @@
   "scripts": {
     "build": "node esbuild.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test \"test/**/*.test.mjs\""
+    "test": "npm run build && node --test \"test/**/*.test.mjs\"",
+    "pack": "npm run build && cd dist && zip -qr -X ../pulse-extension.zip . && cd .. && echo 'Wrote extension/pulse-extension.zip — upload this to the Chrome Web Store.'"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",

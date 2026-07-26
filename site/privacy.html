@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pulse — Privacy Policy</title>
+    <style>
+      :root { color-scheme: dark light; }
+      body { margin:0; background:#0a0b0f; color:#e9eaf0;
+        font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif;
+        display:flex; justify-content:center; padding:56px 20px; }
+      .wrap { max-width:680px; }
+      h1 { font-size:30px; margin:0 0 4px; }
+      .updated { color:#8a8f9c; margin:0 0 32px; font-size:14px; }
+      h2 { font-size:18px; margin:32px 0 8px; }
+      p, li { color:#c9ccd6; }
+      a { color:#78b4ff; }
+      strong { color:#e9eaf0; }
+      code { background:#16181f; padding:2px 6px; border-radius:5px; font-size:14px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Pulse — Privacy Policy</h1>
+      <p class="updated">Last updated 25 July 2026</p>
+
+      <p>Pulse is a browser extension that fills web forms from details you have chosen to save. This policy explains exactly what it touches and where that data goes. In plain terms: your details stay on your device, Pulse never fills or transmits passwords or card numbers, and nothing is sold or used for advertising.</p>
+
+      <h2>What Pulse stores</h2>
+      <p>Your saved details — the things you fill into forms, like your name, email, phone, and address — are kept in your browser's local storage (<code>chrome.storage.local</code>) <strong>on your own device</strong>. They are not uploaded to any Pulse account or server for storage.</p>
+
+      <h2>What Pulse sends, and to whom</h2>
+      <p>To work out which of your details go in which box, when you ask Pulse to fill a form it sends, over an encrypted connection to the Pulse service (<code>pulse-demo.fly.dev</code>):</p>
+      <ul>
+        <li>the <strong>structure</strong> of the form on the page you are on (field labels, names, and types — not the page's private contents), and</li>
+        <li>the <strong>details you saved</strong>, so they can be matched to the fields.</li>
+      </ul>
+      <p>For forms with unusual fields, a screenshot of that page may be sent to a vision model provider (Google Gemini) so Pulse can understand the layout. These requests are used only to compute the fill and are not stored to build a profile of you.</p>
+
+      <h2>What Pulse never touches</h2>
+      <p>Pulse never fills, sends, or stores <strong>passwords, card numbers, security codes, or other secrets</strong>. Those fields are detected and left entirely to you. Pulse also never submits a form on your behalf.</p>
+
+      <h2>Permissions</h2>
+      <p>The extension requests access to the sites you visit only so it can read and fill the form on the tab you ask it to. It acts only when you trigger it, and it does not run in the background or track your browsing.</p>
+
+      <h2>Sharing</h2>
+      <p>Pulse does not sell your data and does not share it with third parties except the service providers named above, solely to perform the fill you requested.</p>
+
+      <h2>Contact</h2>
+      <p>Questions or requests: <a href="mailto:obi@usegoblin.xyz">obi@usegoblin.xyz</a>.</p>
+    </div>
+  </body>
+</html>

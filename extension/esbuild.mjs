@@ -17,5 +17,6 @@ await Promise.all([
 
 await cp("manifest.json", "dist/manifest.json");
 await cp("popup.html", "dist/popup.html");
+await cp("icons", "dist/icons", { recursive: true });
 
 console.log("built extension → dist/");
