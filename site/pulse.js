@@ -285,8 +285,7 @@ async function toggleCompanion() {
 
 /* ---------- session lifecycle ---------- */
 async function start() {
-  startBtn.disabled = true;
-  setStatus("Waking Pulse up…");
+  startBtn.disabled = true; // the disabled button is the "working…" signal
 
   let sessionToken;
   try {
