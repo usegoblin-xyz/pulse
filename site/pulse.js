@@ -266,15 +266,21 @@ function sigChanged(sig) {
 async function describeNow(prompt) {
   const image = await captureScreenFrame();
   if (!image) return null;
-  const res = await fetch(`${BRAIN}/see`, {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ image, question: prompt }),
-  });
-  if (res.status === 503) return "___novision___";
-  if (res.status === 429) { visionPausedUntil = Date.now() + 60000; return "___quota___"; } // back off a minute
-  if (!res.ok) return null;
-  const { text } = await res.json();
-  return text || null;
+  // Hard timeout so a cold or slow VLM can NEVER hang the avatar's turn — the
+  // tool must always return promptly so Pulse actually says something.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 22000);
+  try {
+    const res = await fetch(`${BRAIN}/see`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ image, question: prompt }), signal: ctrl.signal,
+    });
+    if (res.status === 503) return "___loading___";   // model still warming up
+    if (res.status === 429) { visionPausedUntil = Date.now() + 60000; return "___quota___"; }
+    if (!res.ok) return null;
+    const { text } = await res.json();
+    return text || null;
+  } finally { clearTimeout(timer); }
 }
 
 // Runs every few seconds while sharing. Silent — it just keeps screenContext
@@ -289,8 +295,8 @@ async function screenTick() {
   describing = true;
   try {
     const text = await describeNow(AMBIENT_PROMPT);
-    if (text && text !== "___novision___" && text !== "___quota___") screenContext = { text, at: Date.now() };
-  } catch { /* keep the last good context */ } finally { describing = false; }
+    if (text && !text.startsWith("___")) screenContext = { text, at: Date.now() };
+  } catch { /* timeout/abort or network — keep the last good context */ } finally { describing = false; }
 }
 
 async function lookAtScreen() {
@@ -300,12 +306,12 @@ async function lookAtScreen() {
   if (screenContext.text && Date.now() - screenContext.at < 20000) return screenContext.text;
   try {
     const text = await describeNow("Look at this screen. In two or three short spoken sentences, say what app or page it is and the main things on it. Plain speech, no lists.");
-    if (text === "___novision___") return "My eyes aren't switched on yet. My vision needs a key added in settings.";
+    if (text === "___loading___") return "My eyes are just starting up. Give me a few seconds and ask me to look again.";
     if (text === "___quota___") return "My vision has hit its limit for the moment. Give it a minute and ask me to look again.";
-    if (!text) return "I looked but couldn't quite make it out just then.";
+    if (!text) return "I looked but couldn't quite make it out just then. Try me again.";
     screenContext = { text, at: Date.now() };
     return text;
-  } catch { return "I couldn't reach my vision just then."; }
+  } catch { return "My vision took too long just then. Give me a moment and ask me to look again."; }
 }
 
 /* ---------- Share screen ---------- */
