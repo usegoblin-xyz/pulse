@@ -17,11 +17,15 @@ const UA =
 export interface SearchResult { title: string; url: string; snippet: string; }
 export interface SearchResponse { answer?: string; results: SearchResult[]; provider: string; }
 
-export interface SearchConfig { provider: "tavily" | "wikipedia"; apiKey: string; }
+export type SearchProvider = "nimble" | "tavily" | "wikipedia";
+export interface SearchConfig { provider: SearchProvider; nimbleKey: string; tavilyKey: string; }
 export function searchConfigFromEnv(env = process.env): SearchConfig {
-  const apiKey = env.PULSE_SEARCH_API_KEY || "";
-  const provider = (env.PULSE_SEARCH_PROVIDER as "tavily" | "wikipedia") || (apiKey ? "tavily" : "wikipedia");
-  return { provider, apiKey };
+  const nimbleKey = env.PULSE_NIMBLE_API_KEY || "";
+  const tavilyKey = env.PULSE_SEARCH_API_KEY || "";
+  const provider =
+    (env.PULSE_SEARCH_PROVIDER as SearchProvider) ||
+    (nimbleKey ? "nimble" : tavilyKey ? "tavily" : "wikipedia");
+  return { provider, nimbleKey, tavilyKey };
 }
 
 function stripTags(s: string): string {
@@ -53,6 +57,27 @@ async function searchWikipedia(query: string, max: number): Promise<SearchRespon
   return { results, provider: "wikipedia" };
 }
 
+// Nimble's SERP API: real Google-backed results, served through Nimble's own
+// network, so it works from a datacenter where the search engines block us.
+async function searchNimble(query: string, max: number, apiKey: string): Promise<SearchResponse> {
+  const res = await fetch("https://sdk.nimbleway.com/v2/search", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ query, max_results: max }),
+  });
+  if (!res.ok) throw new Error(`nimble ${res.status}: ${(await res.text()).slice(0, 160)}`);
+  const data: any = await res.json();
+  const results: SearchResult[] = (Array.isArray(data?.results) ? data.results : [])
+    .slice(0, max)
+    .map((r: any) => ({
+      title: String(r?.title || ""),
+      url: String(r?.url || ""),
+      snippet: String(r?.description || r?.content || "").slice(0, 400),
+    }))
+    .filter((r: SearchResult) => r.url);
+  return { results, provider: "nimble" };
+}
+
 async function searchTavily(query: string, max: number, apiKey: string): Promise<SearchResponse> {
   const res = await fetch("https://api.tavily.com/search", {
     method: "POST",
@@ -77,9 +102,15 @@ async function searchTavily(query: string, max: number, apiKey: string): Promise
 export async function search(query: string, cfg: SearchConfig, max = 6): Promise<SearchResponse> {
   const q = (query || "").trim();
   if (!q) return { results: [], provider: cfg.provider };
-  if (cfg.provider === "tavily" && cfg.apiKey) {
-    try { return await searchTavily(q, max, cfg.apiKey); }
-    catch (e: any) { console.error("[search] tavily failed, falling back to wikipedia:", e?.message ?? e); }
+  // Try the configured live-web provider first; fall back to Wikipedia (keyless,
+  // datacenter-friendly) if it errors, so search never goes fully dark.
+  if (cfg.provider === "nimble" && cfg.nimbleKey) {
+    try { return await searchNimble(q, max, cfg.nimbleKey); }
+    catch (e: any) { console.error("[search] nimble failed, falling back:", e?.message ?? e); }
+  }
+  if (cfg.provider === "tavily" && cfg.tavilyKey) {
+    try { return await searchTavily(q, max, cfg.tavilyKey); }
+    catch (e: any) { console.error("[search] tavily failed, falling back:", e?.message ?? e); }
   }
   return searchWikipedia(q, max);
 }
