@@ -371,6 +371,15 @@ async function start() {
           return Object.keys(prof).length ? JSON.stringify(prof) : "Nothing saved yet, this is a first visit.";
         },
       });
+      client.registerToolCallHandler?.("open_and_fill", {
+        onStart: async (p) => {
+          const url = p?.arguments?.url || "";
+          console.log("[pulse] open_and_fill", url);
+          if (!url) return "Tell me the web address of the form and I'll open it and fill it.";
+          openBrowserView(String(url));
+          return "Opening it now. Watch the panel — I'm filling it in for you, and I won't submit anything.";
+        },
+      });
     } catch (e) { console.warn("[pulse] could not register tools", e); }
 
     client.addListener(AnamEvent.SESSION_READY, () => {
@@ -410,6 +419,56 @@ function stop() {
   startBtn.disabled = false;
   setStatus("");
 }
+
+/* ---------- live browser view: Pulse's server-side browser fills a form ---------- */
+const browserView = document.getElementById("browser-view");
+const bvFrame = document.getElementById("bv-frame");
+const bvStatus = document.querySelector(".bv-status");
+const bvUrlForm = document.getElementById("bv-url-form");
+const bvUrl = document.getElementById("bv-url");
+const fillformBtn = document.getElementById("fillform-button");
+let bvPoll = null;
+let bvSession = null;
+
+function openBrowserView(prefillUrl) {
+  browserView?.classList.add("show");
+  if (bvUrlForm) bvUrlForm.style.display = prefillUrl ? "none" : "flex";
+  if (bvFrame) bvFrame.style.display = "none";
+  if (bvStatus) bvStatus.textContent = "Paste a form's address and I'll open it and fill it in.";
+  if (prefillUrl) startBrowserFill(prefillUrl);
+}
+function closeBrowserView() {
+  browserView?.classList.remove("show");
+  if (bvPoll) { clearInterval(bvPoll); bvPoll = null; }
+}
+async function startBrowserFill(url) {
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+  bvSession = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
+  if (bvUrlForm) bvUrlForm.style.display = "none";
+  if (bvFrame) bvFrame.style.display = "block";
+  if (bvStatus) bvStatus.textContent = "Opening the page…";
+  try {
+    const res = await fetch(`${BRAIN}/browser/run`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: bvSession, url, profile: getPageProfile() }),
+    });
+    if (!res.ok) { if (bvStatus) bvStatus.textContent = "I couldn't open that address."; return; }
+  } catch { if (bvStatus) bvStatus.textContent = "I couldn't reach the browser just now."; return; }
+  if (bvPoll) clearInterval(bvPoll);
+  bvPoll = setInterval(async () => {
+    try {
+      const r = await fetch(`${BRAIN}/browser/frame?session=${encodeURIComponent(bvSession)}`);
+      if (!r.ok) return;
+      const f = await r.json();
+      if (f.frame && bvFrame) bvFrame.src = f.frame;
+      if (f.message && bvStatus) bvStatus.textContent = f.message;
+      if (f.status === "done" || f.status === "error") { clearInterval(bvPoll); bvPoll = null; }
+    } catch { /* keep polling */ }
+  }, 900);
+}
+fillformBtn?.addEventListener("click", () => openBrowserView());
+bvUrlForm?.addEventListener("submit", (e) => { e.preventDefault(); const u = bvUrl.value.trim(); if (u) startBrowserFill(u); });
+document.getElementById("bv-close")?.addEventListener("click", closeBrowserView);
 
 startBtn?.addEventListener("click", start);
 stopBtn?.addEventListener("click", stop);

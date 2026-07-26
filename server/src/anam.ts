@@ -95,6 +95,21 @@ export const RECALL_DETAILS_TOOL = {
   awaitResult: true,
 } as const;
 
+// Open a form at a URL in Pulse's own server-side browser and fill it live —
+// the no-install path. Handler in pulse.js opens the streamed view.
+export const OPEN_AND_FILL_TOOL = {
+  type: "client",
+  name: "open_and_fill",
+  description:
+    "Open a form at a web address in your own browser and fill it from the user's saved details, shown to them live. Call this the moment the user gives you the address (URL) of a form they want filled, or asks you to fill a form and you have its address. Never submits.",
+  parameters: {
+    type: "object",
+    properties: { url: { type: "string", description: "the form's web address" } },
+    required: ["url"],
+  },
+  awaitResult: true,
+} as const;
+
 /** Pure: the personaConfig we send to Anam. Split out so it's unit-testable. */
 export function buildPersonaConfig(cfg: AnamConfig): Record<string, unknown> {
   if (cfg.personaId) return { personaId: cfg.personaId };
@@ -105,7 +120,7 @@ export function buildPersonaConfig(cfg: AnamConfig): Record<string, unknown> {
     llmId: cfg.llmId,
     avatarModel: cfg.avatarModel,
     systemPrompt: cfg.systemPrompt,
-    tools: [FILL_FORM_TOOL, LOOK_AT_SCREEN_TOOL, SAVE_DETAILS_TOOL, RECALL_DETAILS_TOOL],
+    tools: [FILL_FORM_TOOL, LOOK_AT_SCREEN_TOOL, SAVE_DETAILS_TOOL, RECALL_DETAILS_TOOL, OPEN_AND_FILL_TOOL],
   };
 }
 

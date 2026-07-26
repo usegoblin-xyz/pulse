@@ -22,5 +22,6 @@ primary_region = "iad"
   min_machines_running = 1
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb"
+  # Chromium needs headroom — 512mb is not enough for the browser agent.
+  size = "shared-cpu-2x"
+  memory = "2048mb"

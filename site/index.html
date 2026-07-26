@@ -135,6 +135,37 @@
       }
       #install-button:hover{background:rgba(120,180,255,.22)}
 
+      /* ---- "Fill a form" primary action ---- */
+      #fillform-button{
+        width:100%;margin-top:14px;
+        font-family:inherit;font-size:14px;font-weight:600;
+        border:none;border-radius:999px;padding:13px 24px;cursor:pointer;
+        background:#78b4ff;color:#06111f;box-shadow:0 10px 30px rgba(120,180,255,.28);
+        transition:transform .15s,background .2s;
+      }
+      #fillform-button:hover{transform:translateY(-1px);background:#8fc2ff}
+
+      /* ---- live browser view ---- */
+      #browser-view{
+        position:fixed;inset:0;z-index:20;display:none;
+        flex-direction:column;background:rgba(4,5,8,.92);backdrop-filter:blur(8px);
+      }
+      #browser-view.show{display:flex}
+      .bv-bar{display:flex;align-items:center;justify-content:space-between;
+        padding:14px 20px;border-bottom:1px solid rgba(255,255,255,.1)}
+      .bv-status{font-size:13.5px;color:#cfe2ff;font-weight:500}
+      .bv-close{background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.2);
+        border-radius:999px;padding:7px 16px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+      .bv-stage{flex:1;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto}
+      #bv-frame{max-width:100%;max-height:100%;border-radius:10px;
+        box-shadow:0 20px 60px rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.08)}
+      .bv-urlbar{display:flex;gap:10px;width:100%;max-width:560px}
+      #bv-url{flex:1;background:#141821;color:#f0efe9;border:1.5px solid rgba(255,255,255,.2);
+        border-radius:999px;padding:13px 20px;font:inherit;font-size:15px}
+      #bv-url:focus{outline:none;border-color:rgba(120,180,255,.6)}
+      .bv-urlbar button{background:#78b4ff;color:#06111f;border:none;border-radius:999px;
+        padding:13px 22px;font:inherit;font-weight:600;cursor:pointer;white-space:nowrap}
+
       @media (max-width:980px){
         body{overflow:auto}
         .hero{height:auto;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding-bottom:40px}
@@ -168,9 +199,24 @@
           <button id="pip-button" disabled style="opacity:.55">Companion Mode</button>
           <button id="stop-button" disabled style="opacity:.55">Stop</button>
         </div>
-        <button id="install-button">⌁ Add hands-free form fill</button>
+        <button id="fillform-button">Fill a form for me</button>
       </aside>
     </main>
+
+    <!-- Live view of Pulse's server-side browser filling a form. -->
+    <div id="browser-view" aria-label="Pulse filling a form">
+      <div class="bv-bar">
+        <span class="bv-status">Paste a form's address to begin.</span>
+        <button class="bv-close" id="bv-close">Close</button>
+      </div>
+      <div class="bv-stage">
+        <form id="bv-url-form" class="bv-urlbar">
+          <input id="bv-url" type="text" placeholder="Paste the form's web address…" autocomplete="off" />
+          <button type="submit">Open &amp; fill</button>
+        </form>
+        <img id="bv-frame" alt="Live browser" style="display:none" />
+      </div>
+    </div>
 
     <!-- No file box: Pulse is computer-use (fills forms in place), not a
          document generator. Chat history stays offstage for future wiring. -->
@@ -192,6 +238,6 @@
 
     <!-- Wires "Start conversation" to a live Anam avatar session via the brain
          (server/), and connects the avatar to the form-filler (fill_form tool). -->
-    <script type="module" src="pulse.js?v=20"></script>
+    <script type="module" src="pulse.js?v=21"></script>
   </body>
 </html>

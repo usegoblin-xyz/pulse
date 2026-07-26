@@ -16,6 +16,7 @@ import { planFill } from "./planner.js";
 import { makeOpenAIModel, modelConfigFromEnv } from "./model.js";
 import { mintSessionToken, anamConfigFromEnv } from "./anam.js";
 import { describeScreen, planAction, visionConfigFromEnv } from "./vision.js";
+import { startRun, getFrame } from "./browser.js";
 import type { FormField, Profile } from "./types.js";
 
 const PORT = Number(process.env.PORT || 8787);
@@ -244,6 +245,33 @@ const server = http.createServer(async (req, res) => {
       console.error("[agent-step]", e?.message ?? e);
       res.writeHead(502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not plan the next step" }));
     }
+    return;
+  }
+
+  // --- server-side browser agent: open a URL and fill it in real time ---
+  if (req.method === "POST" && req.url === "/browser/run") {
+    try {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      const sessionId = String(body.sessionId || "").slice(0, 100);
+      const url = String(body.url || "");
+      const profile = body.profile && typeof body.profile === "object" ? body.profile : {};
+      if (!sessionId || !/^https?:\/\//.test(url)) {
+        res.writeHead(400, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "sessionId and an http(s) url are required" }));
+        return;
+      }
+      startRun(sessionId, url, profile); // runs async; the client polls /browser/frame
+      res.writeHead(200, { "content-type": "application/json", ...cors }).end(JSON.stringify({ ok: true }));
+    } catch (e: any) {
+      console.error("[browser/run]", e?.message ?? e);
+      res.writeHead(400, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not start the browser" }));
+    }
+    return;
+  }
+  if (req.method === "GET" && req.url?.startsWith("/browser/frame")) {
+    const q = new URL(req.url, "http://x").searchParams;
+    const f = getFrame(q.get("session") || "");
+    if (!f) { res.writeHead(404, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "no session" })); return; }
+    res.writeHead(200, { "content-type": "application/json", ...cors }).end(JSON.stringify(f));
     return;
   }
 
