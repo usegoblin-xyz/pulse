@@ -12,6 +12,7 @@ const BRAIN = (window.PULSE_BRAIN_URL || "").replace(/\/$/, "");
 const startBtn = document.getElementById("start-button");
 const stopBtn = document.getElementById("stop-button");
 const screenBtn = document.getElementById("screen-button");
+const lookBtn = document.getElementById("look-button");
 const pipBtn = document.getElementById("pip-button");
 const status = document.getElementById("status");
 const poster = document.getElementById("poster");
@@ -317,11 +318,13 @@ async function lookAtScreen() {
 /* ---------- Share screen ---------- */
 function stopScreen() {
   if (screenLoop) { clearInterval(screenLoop); screenLoop = null; }
-  screenContext = { text: "", at: 0 }; lastSig = null;
+  screenContext = { text: "", at: 0 }; lastSig = null; describeGen++;
   screenStream?.getTracks().forEach((t) => t.stop());
   screenStream = null;
   if (screenVideo) { screenVideo.srcObject = null; screenVideo.remove(); screenVideo = null; }
   if (screenBtn) screenBtn.textContent = "Share screen";
+  if (lookBtn) lookBtn.style.display = "none";
+  flashBanner("", 0);
 }
 async function toggleScreen() {
   if (screenStream) { stopScreen(); return; }
@@ -337,16 +340,55 @@ async function toggleScreen() {
     screenVideo.style.cssText = "position:fixed;left:-9999px;width:1px;height:1px";
     document.body.appendChild(screenVideo);
     await screenVideo.play().catch(() => {});
-    // Warm the first read, then keep sight fresh in the background.
-    screenTick();
     if (screenLoop) clearInterval(screenLoop);
     // 8s tick; the in-flight guard + change-gating self-throttle to the CPU
     // VLM's real pace, so this never backs up.
     screenLoop = setInterval(screenTick, 8000);
-    client?.sendUserMessage?.("[The user just shared their screen and you can now see it continuously, including as they change tabs. Call look_at_screen now, tell them what you see, and if they shared only one tab, remind them once they can share their whole screen so you can follow along.]");
     screenStream.getVideoTracks()[0].addEventListener("ended", stopScreen);
+    if (lookBtn) lookBtn.style.display = "block";
+    // DETERMINISTIC describe-on-share: don't rely on the LLM choosing to call a
+    // tool (which fails when the mic is noisy and utterances barge in). We look
+    // and make Pulse speak the result ourselves.
+    describeOnShare();
   } catch { setStatus("Screen share was cancelled."); }
 }
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function waitForFrame(maxMs = 3500) {
+  const t = Date.now();
+  while ((!screenVideo || !screenVideo.videoWidth) && Date.now() - t < maxMs) await sleep(150);
+  return !!(screenVideo && screenVideo.videoWidth);
+}
+// Flash a description on-screen too, so there's a visual channel even if the
+// avatar's audio gets barged by a noisy mic.
+function flashBanner(text, ms = 8000) {
+  const b = document.getElementById("action-banner");
+  if (!b) return;
+  b.textContent = text || "";
+  b.style.display = text ? "block" : "none";
+  b.style.background = "rgba(18,20,26,.94)";
+  b.style.color = "#e8ecf3";
+  b.style.border = "1px solid rgba(255,255,255,.16)";
+  b.style.whiteSpace = "normal";
+  b.style.maxWidth = "60vw";
+  clearTimeout(b._t);
+  if (ms) b._t = setTimeout(() => { b.style.display = "none"; }, ms);
+}
+let describeGen = 0;
+// Look at the screen and make Pulse SPEAK the result directly (client.talk),
+// bypassing the LLM tool-call path entirely. withAck adds a filler line to cover
+// a cold VLM's warm-up. Used on share and by the "What do you see?" button.
+async function speakScreen(withAck) {
+  const gen = ++describeGen;
+  flashBanner(withAck ? "Screen shared. Pulse is looking…" : "Pulse is looking…", 0);
+  if (withAck) { try { client?.talk?.("Alright, I can see your screen now. Give me a second to take a look."); } catch {} }
+  await waitForFrame();
+  const text = await lookAtScreen();
+  if (gen !== describeGen || !screenStream) return; // superseded by a newer look, or sharing stopped
+  flashBanner(text, 10000);
+  try { client?.talk?.(text); } catch (e) { console.error("[pulse] talk failed", e); }
+}
+function describeOnShare() { return speakScreen(true); }
 
 /* ---------- Companion mode (floating always-on-top window) ---------- */
 async function toggleCompanion() {
@@ -463,4 +505,5 @@ function stop() {
 startBtn?.addEventListener("click", start);
 stopBtn?.addEventListener("click", stop);
 screenBtn?.addEventListener("click", toggleScreen);
+lookBtn?.addEventListener("click", () => { if (screenStream) speakScreen(false); });
 pipBtn?.addEventListener("click", toggleCompanion);
