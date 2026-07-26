@@ -21,6 +21,7 @@ let client = null;
 let screenStream = null;
 let screenVideo = null;
 let companionWin = null;
+let micStream = null;
 
 // Conversation capture — Anam's server transcript comes back empty for Pulse,
 // so we stream the live message history to the brain ourselves.
@@ -270,8 +271,7 @@ async function toggleScreen() {
     screenVideo.style.cssText = "position:fixed;left:-9999px;width:1px;height:1px";
     document.body.appendChild(screenVideo);
     await screenVideo.play().catch(() => {});
-    // Nudge Pulse to look at the freshly shared screen.
-    client?.sendUserMessage?.("[The user just shared their screen. Call look_at_screen now, then tell them what you see.]");
+    // No auto-narration: Pulse looks only when the user asks about their screen.
     screenStream.getVideoTracks()[0].addEventListener("ended", stopScreen);
   } catch { setStatus("Screen share was cancelled."); }
 }
@@ -360,7 +360,20 @@ async function start() {
       client.talk("I'm Pulse. Ask me anything and I'll go read the web and come back with the real answer, or share your screen and I'll tell you what I see.");
     });
     client.addListener(AnamEvent.CONNECTION_CLOSED, stop);
-    await client.streamToVideoElement("persona-video");
+    // Capture the mic ourselves with speech-friendly processing (auto-gain lifts
+    // a quiet voice, noise + echo suppression clean it up) and hand that stream
+    // to Anam, instead of letting it grab the raw default. One permission prompt.
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        },
+      });
+    } catch (e) { console.warn("[pulse] mic capture failed, using default", e); micStream = null; }
+    await client.streamToVideoElement("persona-video", micStream || undefined);
   } catch (err) {
     console.error("[pulse] stream failed:", err);
     const n = String(err?.name || err?.message || "");
@@ -382,6 +395,7 @@ function stop() {
   if (transcriptTimer) { clearTimeout(transcriptTimer); transcriptTimer = null; }
   saveTranscript();
   if (client) { client.stopStreaming(); client = null; }
+  if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
   if (poster) poster.style.opacity = "1";
   enable(stopBtn, false); enable(screenBtn, false); enable(pipBtn, false);
   startBtn.disabled = false;
