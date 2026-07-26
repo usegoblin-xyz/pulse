@@ -40,17 +40,25 @@ let companionWin = null;
 // Conversation capture — Anam's server transcript comes back empty for Pulse,
 // so we stream the live message history to the brain ourselves.
 let conversationId = null;
-let latestMessages = [];
+let convoLog = [];
+const seenMsgs = new Set();
 let transcriptTimer = null;
+// One interleaved log from both sources: Pulse's turns (history event) AND your
+// typed messages (which the history event omits). Deduped by role+content.
+function logMsg(role, content) {
+  content = (content || "").trim();
+  const key = role + "::" + content;
+  if (!content || seenMsgs.has(key)) return;
+  seenMsgs.add(key);
+  convoLog.push({ role, content });
+  if (!transcriptTimer) transcriptTimer = setTimeout(() => { transcriptTimer = null; saveTranscript(); }, 2000);
+}
 async function saveTranscript() {
-  if (!conversationId || !latestMessages.length) return;
+  if (!conversationId || !convoLog.length) return;
   try {
     await fetch(`${BRAIN}/transcript`, {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        sessionId: conversationId, ua: navigator.userAgent,
-        messages: latestMessages.map((m) => ({ role: m.role, content: m.content })),
-      }),
+      body: JSON.stringify({ sessionId: conversationId, ua: navigator.userAgent, messages: convoLog }),
     });
   } catch { /* best-effort */ }
 }
@@ -324,8 +332,7 @@ async function start() {
     // Capture the conversation as it happens (debounced save to the brain).
     conversationId = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
     client.addListener(AnamEvent.MESSAGE_HISTORY_UPDATED, (messages) => {
-      if (Array.isArray(messages)) latestMessages = messages;
-      if (!transcriptTimer) transcriptTimer = setTimeout(() => { transcriptTimer = null; saveTranscript(); }, 2500);
+      if (Array.isArray(messages)) for (const m of messages) logMsg(m.role === "user" ? "user" : "persona", m.content);
     });
 
     // Register the fill_form handler BEFORE streaming, or an early tool call is missed.
@@ -407,5 +414,5 @@ pipBtn?.addEventListener("click", toggleCompanion);
 sayForm?.addEventListener("submit", (e) => {
   e.preventDefault();
   const t = sayInput.value.trim();
-  if (t && client) { client.sendUserMessage?.(t); sayInput.value = ""; }
+  if (t && client) { logMsg("user", t); client.sendUserMessage?.(t); sayInput.value = ""; }
 });
