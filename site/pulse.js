@@ -30,6 +30,7 @@ const pipBtn = document.getElementById("pip-button");
 const status = document.getElementById("status");
 const poster = document.getElementById("poster");
 const videoEl = document.getElementById("persona-video");
+const installBtn = document.getElementById("install-button");
 
 let client = null;
 let screenStream = null;
@@ -74,7 +75,7 @@ const pending = new Map();
 window.addEventListener("message", (ev) => {
   if (ev.source !== window || ev.data?.source !== EXT) return;
   const { cmd, id, result } = ev.data;
-  if (cmd === "ready" || cmd === "pong") { extPresent = true; hideInstall(); } // helper arrived
+  if (cmd === "ready" || cmd === "pong") { extPresent = true; hideInstall(); if (installBtn) installBtn.style.display = "none"; } // helper arrived
   if (cmd === "fill-result" && pending.has(id)) { pending.get(id)(result); pending.delete(id); }
 });
 
@@ -90,6 +91,9 @@ function extCall(cmd, extra = {}, timeoutMs = 20000) {
 
 // Detect the extension shortly after load (it also announces itself via "ready").
 extCall("ping", {}, 600).then((r) => { if (r) extPresent = true; });
+// Surface the "add the helper" button if the extension hasn't announced itself.
+setTimeout(() => { if (!extPresent && installBtn) installBtn.style.display = "block"; }, 1300);
+installBtn?.addEventListener("click", showInstall);
 
 /* ---------- "Add Pulse to Chrome" prompt ---------- */
 // Set window.PULSE_EXTENSION_URL to the Chrome Web Store listing once published.
