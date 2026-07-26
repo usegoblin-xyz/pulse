@@ -44,16 +44,36 @@ export function anamConfigFromEnv(env = process.env): AnamConfig {
   };
 }
 
-// Declared to Anam at mint time so Pulse's LLM knows it can call it. The
-// browser handler that runs when Pulse invokes it is registered client-side in
-// pulse.js (it scans the page, plans the fill, and types the values in). Anam
-// honors inline tool defs on ephemeral mints, so no pre-created tool is needed.
-export const FILL_FORM_TOOL = {
+// Declared to Anam at mint time so Pulse's LLM knows it can call them. The
+// handlers run client-side in pulse.js and call the brain's /research endpoints.
+// Anam honors inline tool defs on ephemeral mints, so no pre-created tool needed.
+
+// Pulse searches the live web. Returns a short list of sources with snippets
+// (and, with Tavily, a synthesized answer) he can read back and reason over.
+export const WEB_SEARCH_TOOL = {
   type: "client",
-  name: "fill_form",
+  name: "web_search",
   description:
-    "Fill the form on the user's current screen from their saved details. Call this the moment the user asks you to fill out, complete, or auto-fill a form. It reads the visible form's fields, fills the ones it can, and NEVER submits. Returns a short summary of what was filled and what still needs the user (including any password or payment field, which you must never fill).",
-  parameters: { type: "object", properties: {}, required: [] },
+    "Search the live web for current information. Call this whenever the user asks a question whose answer you are not certain of, asks about anything recent, or asks you to look something up, find, research, compare, or check the facts on a topic. Returns a short list of sources (title, web address, and a snippet) and sometimes a quick answer. Read the snippets, and if you need more depth call read_page on the most promising source before you reply.",
+  parameters: {
+    type: "object",
+    properties: { query: { type: "string", description: "what to search the web for" } },
+    required: ["query"],
+  },
+  awaitResult: true,
+} as const;
+
+// Pulse opens one page and reads it in full (server-side headless browser).
+export const READ_PAGE_TOOL = {
+  type: "client",
+  name: "read_page",
+  description:
+    "Open one specific web page and read it in full. Call this after web_search when the snippets are not enough and you need the details from a source, or the moment the user gives you a web address and asks what it says or to summarize it. Returns the page's title and its readable text. Use what you read to answer, and say which source it came from.",
+  parameters: {
+    type: "object",
+    properties: { url: { type: "string", description: "the web address of the page to read" } },
+    required: ["url"],
+  },
   awaitResult: true,
 } as const;
 
@@ -68,48 +88,6 @@ export const LOOK_AT_SCREEN_TOOL = {
   awaitResult: true,
 } as const;
 
-// Memory: Pulse collects the user's common form details conversationally and
-// keeps them on the user's own device (localStorage on the page). Summoned on
-// demand to help fill forms — no extension, no install. Handlers in pulse.js.
-export const SAVE_DETAILS_TOOL = {
-  type: "client",
-  name: "save_details",
-  description:
-    "Remember details the user gives you (name, email, phone, address, company, job title, etc.) so you can help them fill forms later. Call this whenever the user tells you a detail worth keeping. Never save a password, card number, or other secret. Pass the details as key/value pairs.",
-  parameters: {
-    type: "object",
-    properties: {
-      details: { type: "object", description: 'e.g. {"fullName":"Ada Lovelace","email":"ada@x.com","city":"London"}' },
-    },
-    required: ["details"],
-  },
-  awaitResult: true,
-} as const;
-
-export const RECALL_DETAILS_TOOL = {
-  type: "client",
-  name: "recall_details",
-  description:
-    "Get the details you have saved for this user, so you can tell them what goes in each form field. Returns the saved key/value pairs (or nothing if this is a first visit).",
-  parameters: { type: "object", properties: {}, required: [] },
-  awaitResult: true,
-} as const;
-
-// Open a form at a URL in Pulse's own server-side browser and fill it live —
-// the no-install path. Handler in pulse.js opens the streamed view.
-export const OPEN_AND_FILL_TOOL = {
-  type: "client",
-  name: "open_and_fill",
-  description:
-    "Open a form at a web address in your own browser and fill it from the user's saved details, shown to them live. Call this the moment the user gives you the address (URL) of a form they want filled, or asks you to fill a form and you have its address. Never submits.",
-  parameters: {
-    type: "object",
-    properties: { url: { type: "string", description: "the form's web address" } },
-    required: ["url"],
-  },
-  awaitResult: true,
-} as const;
-
 /** Pure: the personaConfig we send to Anam. Split out so it's unit-testable. */
 export function buildPersonaConfig(cfg: AnamConfig): Record<string, unknown> {
   if (cfg.personaId) return { personaId: cfg.personaId };
@@ -120,7 +98,7 @@ export function buildPersonaConfig(cfg: AnamConfig): Record<string, unknown> {
     llmId: cfg.llmId,
     avatarModel: cfg.avatarModel,
     systemPrompt: cfg.systemPrompt,
-    tools: [FILL_FORM_TOOL, LOOK_AT_SCREEN_TOOL, SAVE_DETAILS_TOOL, RECALL_DETAILS_TOOL, OPEN_AND_FILL_TOOL],
+    tools: [WEB_SEARCH_TOOL, READ_PAGE_TOOL, LOOK_AT_SCREEN_TOOL],
   };
 }
 

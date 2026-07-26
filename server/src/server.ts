@@ -17,6 +17,7 @@ import { makeOpenAIModel, modelConfigFromEnv } from "./model.js";
 import { mintSessionToken, anamConfigFromEnv } from "./anam.js";
 import { describeScreen, planAction, visionConfigFromEnv } from "./vision.js";
 import { startRun, getFrame } from "./browser.js";
+import { search, readPage, searchConfigFromEnv } from "./research.js";
 import type { FormField, Profile } from "./types.js";
 
 const PORT = Number(process.env.PORT || 8787);
@@ -78,6 +79,7 @@ function readBody(req: http.IncomingMessage, max = MAX_BODY): Promise<string> {
 }
 
 const vision = visionConfigFromEnv();
+const searchCfg = searchConfigFromEnv();
 
 // Conversation capture. Anam's own transcript store comes back empty for this
 // persona, so the client streams the live message history here instead. In
@@ -218,6 +220,42 @@ const server = http.createServer(async (req, res) => {
     } catch (e: any) {
       console.error("[see]", e?.message ?? e);
       res.writeHead(502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not read the screen" }));
+    }
+    return;
+  }
+
+  // --- research: search the web ---
+  if (req.method === "POST" && req.url === "/research/search") {
+    try {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      const query = String(body.query || "").slice(0, 500);
+      if (!query.trim()) {
+        res.writeHead(400, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "query required" }));
+        return;
+      }
+      const out = await search(query, searchCfg);
+      res.writeHead(200, { "content-type": "application/json", ...cors }).end(JSON.stringify(out));
+    } catch (e: any) {
+      console.error("[research/search]", e?.message ?? e);
+      res.writeHead(502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not search just now" }));
+    }
+    return;
+  }
+
+  // --- research: read a page in full ---
+  if (req.method === "POST" && req.url === "/research/read") {
+    try {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      const url = String(body.url || "");
+      if (!/^https?:\/\//.test(url) && !/^[\w.-]+\.[a-z]{2,}/i.test(url)) {
+        res.writeHead(400, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "a web address is required" }));
+        return;
+      }
+      const out = await readPage(url);
+      res.writeHead(200, { "content-type": "application/json", ...cors }).end(JSON.stringify(out));
+    } catch (e: any) {
+      console.error("[research/read]", e?.message ?? e);
+      res.writeHead(502, { "content-type": "application/json", ...cors }).end(JSON.stringify({ error: "could not open that page" }));
     }
     return;
   }

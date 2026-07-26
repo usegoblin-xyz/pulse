@@ -9,7 +9,9 @@ import { makeOpenAIModel, modelConfigFromEnv } from "./model.js";
 import type { Profile, FormField } from "./types.js";
 
 let browserP: Promise<Browser> | null = null;
-function getBrowser(): Promise<Browser> {
+// Shared Chromium singleton. Exported so research.ts reads pages in the same
+// browser instead of launching a second one (memory is tight on the VM).
+export function getBrowser(): Promise<Browser> {
   if (!browserP) browserP = chromium.launch({ args: ["--no-sandbox", "--disable-dev-shm-usage"] });
   return browserP;
 }

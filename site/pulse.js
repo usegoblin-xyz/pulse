@@ -1,27 +1,13 @@
-// Pulse's front end. Starts the Anam avatar (fast, built-in LLM) and connects
-// it to the form-filler: when Pulse decides to fill a form, its LLM calls the
-// `fill_form` client tool (declared server-side at mint), and the handler below
-// reads the page, asks the brain's /plan-fill planner for values, and types them
-// in — never submitting. Also wires Share screen and Companion (PiP) mode.
-//
-// Reach: this page's handler fills a form in THIS document. To fill a form on
-// another website, the Pulse browser extension carries the same scan/plan/apply
-// to that tab (computer use). The brain holds every secret; nothing here does.
+// Pulse's front end. Starts the Anam avatar (fast, built-in LLM) and gives it a
+// research faculty: when Pulse decides to look something up, its LLM calls one of
+// three client tools declared server-side at mint — `web_search`, `read_page`,
+// and `look_at_screen`. The handlers below call the brain's /research and /see
+// endpoints, show the sources and the page Pulse is reading in the side panel,
+// and hand the findings back to Pulse to speak. The brain holds every key.
 import { createClient } from "https://esm.sh/@anam-ai/js-sdk@latest";
 import { AnamEvent } from "https://esm.sh/@anam-ai/js-sdk@latest/dist/module/types";
 
 const BRAIN = (window.PULSE_BRAIN_URL || "").replace(/\/$/, "");
-
-// The user's saved form details, kept on THIS device (no server, no extension).
-// Pulse collects them conversationally and recalls them to help fill forms.
-function getPageProfile() {
-  try { return JSON.parse(localStorage.getItem("pulse.profile") || "{}"); } catch { return {}; }
-}
-function mergePageProfile(obj) {
-  const merged = { ...getPageProfile(), ...(obj && typeof obj === "object" ? obj : {}) };
-  localStorage.setItem("pulse.profile", JSON.stringify(merged));
-  return merged;
-}
 
 const startBtn = document.getElementById("start-button");
 const stopBtn = document.getElementById("stop-button");
@@ -30,10 +16,10 @@ const pipBtn = document.getElementById("pip-button");
 const status = document.getElementById("status");
 const poster = document.getElementById("poster");
 const videoEl = document.getElementById("persona-video");
-const installBtn = document.getElementById("install-button");
 
 let client = null;
 let screenStream = null;
+let screenVideo = null;
 let companionWin = null;
 
 // Conversation capture — Anam's server transcript comes back empty for Pulse,
@@ -42,8 +28,6 @@ let conversationId = null;
 let convoLog = [];
 const seenMsgs = new Set();
 let transcriptTimer = null;
-// One interleaved log from both sources: Pulse's turns (history event) AND your
-// typed messages (which the history event omits). Deduped by role+content.
 function logMsg(role, content) {
   content = (content || "").trim();
   const key = role + "::" + content;
@@ -62,182 +46,111 @@ async function saveTranscript() {
   } catch { /* best-effort */ }
 }
 
-/* ---------- extension bridge (fill forms on any tab) ----------
- * The Pulse extension injects a relay content script on this page. We talk to
- * it over window.postMessage; it carries the fill to whatever tab the user is
- * looking at (Companion mode). If the extension isn't installed, fill_form
- * falls back to filling a form on THIS page. */
-const EXT = "pulse-ext", PAGE = "pulse-page";
-let extPresent = false;
-let msgId = 0;
-const pending = new Map();
-
-window.addEventListener("message", (ev) => {
-  if (ev.source !== window || ev.data?.source !== EXT) return;
-  const { cmd, id, result } = ev.data;
-  if (cmd === "ready" || cmd === "pong") { extPresent = true; hideInstall(); if (installBtn) installBtn.style.display = "none"; } // helper arrived
-  if (cmd === "fill-result" && pending.has(id)) { pending.get(id)(result); pending.delete(id); }
-});
-
-function extCall(cmd, extra = {}, timeoutMs = 20000) {
-  return new Promise((resolve) => {
-    const id = ++msgId;
-    const done = (r) => resolve(r);
-    pending.set(id, done);
-    window.postMessage({ source: PAGE, cmd, id, ...extra }, window.location.origin);
-    setTimeout(() => { if (pending.has(id)) { pending.delete(id); resolve(null); } }, timeoutMs);
-  });
-}
-
-// Detect the extension shortly after load (it also announces itself via "ready").
-extCall("ping", {}, 600).then((r) => { if (r) extPresent = true; });
-// Surface the "add the helper" button if the extension hasn't announced itself.
-setTimeout(() => { if (!extPresent && installBtn) installBtn.style.display = "block"; }, 1300);
-installBtn?.addEventListener("click", showInstall);
-
-/* ---------- "Add Pulse to Chrome" prompt ---------- */
-// Set window.PULSE_EXTENSION_URL to the Chrome Web Store listing once published.
-const EXTENSION_URL = window.PULSE_EXTENSION_URL || "";
-const installPrompt = document.getElementById("install-prompt");
-const ipAdd = document.getElementById("ip-add");
-const ipDismiss = document.getElementById("ip-dismiss");
-const ipNote = document.getElementById("ip-note");
-
-function showInstall() { installPrompt?.classList.add("show"); }
-function hideInstall() { installPrompt?.classList.remove("show"); }
-
-ipAdd?.addEventListener("click", (e) => {
-  e.preventDefault();
-  if (EXTENSION_URL) {
-    window.open(EXTENSION_URL, "_blank", "noopener");
-  } else {
-    // Not on the Web Store yet — show the developer load steps.
-    ipNote.textContent =
-      "Not on the Chrome Web Store yet. For now: open chrome://extensions, turn on Developer mode, click Load unpacked, and choose the pulse extension/dist folder.";
-    ipNote.classList.add("show");
-  }
-  // After they add it, the page needs a reload for the helper to attach.
-  ipAdd.textContent = "I've added it — refresh";
-  ipAdd.onclick = () => location.reload();
-});
-ipDismiss?.addEventListener("click", hideInstall);
-
 function setStatus(text) {
   if (!status) return;
   status.textContent = text || "";
-  status.style.display = text ? "block" : "none"; // hidden when there's nothing to say
+  status.style.display = text ? "block" : "none";
 }
 function enable(btn, on) {
   if (!btn) return;
   btn.disabled = !on;
   btn.style.opacity = on ? "1" : ".55";
 }
-
-/* ---------- form filling (the fill_form tool handler) ---------- */
-const ID_ATTR = "data-pulse-id";
-const FILLABLE = new Set(["text","email","tel","url","number","search","date","month","password","textarea","select"]);
-const SENSITIVE = /pass(word|code)|\bssn\b|social.?security|card.?(number|num)|\bcvv\b|\bcvc\b|security.?code|account.?number|routing|\bpin\b|tax.?id|passport/i;
-function sensitive(f) {
-  if ((f.type || "").toLowerCase() === "password") return true;
-  return SENSITIVE.test([f.name, f.label, f.autocomplete].filter(Boolean).join(" "));
-}
-function labelFor(el) {
-  const id = el.getAttribute("id");
-  if (id) { const l = document.querySelector(`label[for="${CSS.escape(id)}"]`); if (l?.textContent) return l.textContent.trim(); }
-  const w = el.closest("label"); if (w?.textContent) return w.textContent.trim();
-  return (el.getAttribute("aria-label") || el.getAttribute("placeholder") || "").trim() || undefined;
-}
-function scanForm() {
-  const out = []; let n = 0;
-  for (const el of document.querySelectorAll("input, select, textarea")) {
-    const tag = el.tagName.toLowerCase();
-    const type = (el.getAttribute("type") || (tag === "input" ? "text" : tag)).toLowerCase();
-    if (!FILLABLE.has(type) && !FILLABLE.has(tag)) continue;
-    const r = el.getBoundingClientRect(); if (r.width === 0 || r.height === 0) continue;
-    const fid = `f${n++}`; el.setAttribute(ID_ATTR, fid);
-    const name = el.getAttribute("name") || undefined;
-    const label = labelFor(el);
-    const options = tag === "select" ? Array.from(el.options).map((o) => o.value).filter(Boolean) : undefined;
-    out.push({ id: fid, name, label, type, autocomplete: el.getAttribute("autocomplete") || undefined,
-               required: el.hasAttribute("required"), options, sensitive: sensitive({ name, label, type }) });
-  }
-  return out;
-}
-// Bypass React/Vue's value tracker (a plain el.value = x gets discarded).
-function setNativeValue(el, value) {
-  const protoSet = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value")?.set;
-  const ownSet = Object.getOwnPropertyDescriptor(el, "value")?.set;
-  if (protoSet && ownSet !== protoSet) protoSet.call(el, value);
-  else if (ownSet) ownSet.call(el, value);
-  else el.value = value;
-}
-function applyFills(fills) {
-  let applied = 0;
-  for (const { fieldId, value } of fills) {
-    const el = document.querySelector(`[${ID_ATTR}="${CSS.escape(fieldId)}"]`);
-    if (!el) continue;
-    const type = (el.getAttribute("type") || el.tagName).toLowerCase();
-    if (sensitive({ name: el.getAttribute("name"), label: labelFor(el), type })) continue; // never type a secret
-    if (el.tagName === "SELECT" && !Array.from(el.options).some((o) => o.value === value)) continue;
-    el.focus();
-    setNativeValue(el, value);
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-    el.blur();
-    applied++;
-  }
-  return applied; // NOTE: never .submit() — filling only.
-}
-async function fillForm() {
-  // Preferred path: the extension fills the real site the user is looking at.
-  if (extPresent) {
-    const r = await extCall("fill", { brainUrl: BRAIN || window.location.origin });
-    if (r == null) return "My browser helper didn't answer. Make sure the Pulse extension is on and try again.";
-    if (!r.ok) {
-      if (r.error === "hands-free not enabled") return "To fill it for you across tabs, open the Pulse extension and switch on hands-free fill, then ask me again. Until then, I can walk you through it.";
-      if (r.error === "no form tab") return "Open the page with the form in another tab, then ask me again.";
-      if (String(r.error || "").includes("no details")) return "I don't have your details saved yet. Open the Pulse extension and add them.";
-      return "I couldn't fill that just now. Give it another go in a moment.";
-    }
-    const asks = r.asks || 0;
-    return `Filled ${r.applied || 0} field${r.applied === 1 ? "" : "s"} on the page. I did not submit anything.${asks ? ` ${asks} still need you, including anything sensitive like a password.` : ""}`;
-  }
-
-  // No helper — guide instead of nagging to install (the low-friction path).
-  return "I can't type into that page myself without the browser helper, but I don't need it. Let me look at the form and walk you through it, field by field.";
+function domainOf(u) {
+  try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; }
 }
 
-// Kept for when a form lives on the Pulse page itself (e.g. a demo form).
-async function fillSamePage() {
-  const fields = scanForm();
-  if (!fields.length) return "There's no form on this screen.";
-  let profile = {};
-  try { profile = JSON.parse(localStorage.getItem("pulse.profile") || "{}"); } catch {}
-  if (!Object.keys(profile).length) return "I don't have your details saved yet. Tell me your name and I'll start there.";
-  let plan;
+/* ---------- research panel (shows Pulse's sources and what he's reading) ---------- */
+const panel = document.getElementById("research-panel");
+const rpStatus = document.querySelector(".rp-status");
+const rpResults = document.getElementById("rp-results");
+const rpReading = document.getElementById("rp-reading");
+const rpShot = document.getElementById("rp-shot");
+const rpCaption = document.getElementById("rp-caption");
+
+function openPanel(statusText) {
+  panel?.classList.add("show");
+  if (statusText && rpStatus) rpStatus.textContent = statusText;
+}
+function closePanel() { panel?.classList.remove("show"); }
+document.getElementById("rp-close")?.addEventListener("click", closePanel);
+
+function renderResults(query, results) {
+  if (!rpResults) return;
+  rpResults.innerHTML = "";
+  for (const r of results) {
+    const a = document.createElement("a");
+    a.className = "rp-source"; a.href = r.url; a.target = "_blank"; a.rel = "noopener";
+    a.innerHTML =
+      `<span class="rp-source-title"></span>` +
+      `<span class="rp-source-domain"></span>` +
+      `<span class="rp-source-snip"></span>`;
+    a.querySelector(".rp-source-title").textContent = r.title || r.url;
+    a.querySelector(".rp-source-domain").textContent = domainOf(r.url);
+    a.querySelector(".rp-source-snip").textContent = r.snippet || "";
+    rpResults.appendChild(a);
+  }
+  rpResults.style.display = results.length ? "block" : "none";
+}
+function renderReading(title, url, screenshot) {
+  if (rpReading) rpReading.style.display = "block";
+  if (rpShot) { if (screenshot) { rpShot.src = screenshot; rpShot.style.display = "block"; } else rpShot.style.display = "none"; }
+  if (rpCaption) rpCaption.textContent = title ? `${title} — ${domainOf(url)}` : domainOf(url);
+}
+
+/* ---------- the three research tools ---------- */
+
+// Search the live web. Renders the sources and returns a compact digest Pulse
+// reads back and reasons over.
+async function webSearch(query) {
+  query = (query || "").trim();
+  if (!query) return "Tell me what you'd like me to look up.";
+  openPanel(`Searching for ${query}…`);
+  if (rpReading) rpReading.style.display = "none";
+  let data;
   try {
-    const res = await fetch(`${BRAIN}/plan-fill`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ fields, profile }),
+    const res = await fetch(`${BRAIN}/research/search`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query }),
     });
-    if (!res.ok) throw new Error(String(res.status));
-    plan = await res.json();
-  } catch { return "I couldn't work out the values just now. Give it another go in a moment."; }
-  const applied = applyFills(plan.fills || []);
-  const asks = (plan.asks || []).length;
-  return `Filled ${applied} field${applied === 1 ? "" : "s"}. I did not submit anything.${asks ? ` ${asks} still need you, including anything sensitive like a password.` : ""}`;
+    if (!res.ok) return "I couldn't reach the web just then. Give me a moment and ask again.";
+    data = await res.json();
+  } catch { return "I couldn't reach the web just then. Give me a moment and ask again."; }
+  const results = Array.isArray(data.results) ? data.results : [];
+  renderResults(query, results);
+  if (rpStatus) rpStatus.textContent = results.length ? `Found ${results.length} sources for ${query}.` : `Nothing solid for ${query}.`;
+  if (!results.length && !data.answer) return `I searched for ${query} but didn't find anything solid. Want me to try different words?`;
+  let digest = `Web search results for "${query}":\n`;
+  if (data.answer) digest += `\nQuick synthesized answer: ${data.answer}\n`;
+  results.forEach((r, i) => {
+    digest += `\n${i + 1}. ${r.title} (${domainOf(r.url)})\n   ${r.url}\n   ${(r.snippet || "").slice(0, 300)}\n`;
+  });
+  digest += `\nUse these to answer. If the snippets are thin, call read_page on the most useful web address above before replying. Always tell the user which source your answer came from.`;
+  return digest;
+}
+
+// Read one page in full. Shows the page snapshot and returns its text to Pulse.
+async function readPage(url) {
+  url = (url || "").trim();
+  if (!url) return "Give me the web address and I'll read it.";
+  openPanel(`Opening ${domainOf(url)}…`);
+  let data;
+  try {
+    const res = await fetch(`${BRAIN}/research/read`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }),
+    });
+    if (!res.ok) return "I couldn't open that page just then. It may block outside readers.";
+    data = await res.json();
+  } catch { return "I couldn't open that page just then. It may block outside readers."; }
+  renderReading(data.title, data.url || url, data.screenshot);
+  if (rpStatus) rpStatus.textContent = `Read ${domainOf(data.url || url)}.`;
+  const text = (data.text || "").trim();
+  if (!text) return `I opened ${domainOf(url)} but couldn't pull readable text from it. It may be mostly images or behind a wall.`;
+  return `I read this page.\nTitle: ${data.title || url}\nSource: ${data.url || url}\n\n${text.slice(0, 4800)}\n\nAnswer the user from this, and say it came from ${domainOf(data.url || url)}.`;
 }
 
 /* ---------- vision: look at the shared screen ---------- */
-// A hidden <video> bound to the shared-screen stream, kept playing so a frame is
-// always ready to grab. Far more reliable than ImageCapture on display tracks.
-let screenVideo = null;
-
 async function captureScreenFrame() {
-  if (!screenVideo || !screenVideo.videoWidth) {
-    console.warn("[pulse] no screen frame available (videoWidth=", screenVideo?.videoWidth, ")");
-    return null;
-  }
+  if (!screenVideo || !screenVideo.videoWidth) return null;
   try {
     const scale = Math.min(1, 1280 / screenVideo.videoWidth);
     const canvas = document.createElement("canvas");
@@ -245,14 +158,10 @@ async function captureScreenFrame() {
     canvas.height = Math.round(screenVideo.videoHeight * scale);
     canvas.getContext("2d").drawImage(screenVideo, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL("image/jpeg", 0.6);
-  } catch (e) {
-    console.error("[pulse] captureScreenFrame failed", e);
-    return null;
-  }
+  } catch (e) { console.error("[pulse] captureScreenFrame failed", e); return null; }
 }
-
 async function lookAtScreen() {
-  if (!screenStream) return "You haven't shared your screen yet. Click Share screen, pick the window with the form, and I'll take a look.";
+  if (!screenStream) return "You haven't shared your screen yet. Click Share screen, pick the window you want me to look at, and I'll take a look.";
   const image = await captureScreenFrame();
   if (!image) return "I couldn't grab your screen just then. Try sharing it again.";
   try {
@@ -273,20 +182,17 @@ function stopScreen() {
   if (screenVideo) { screenVideo.srcObject = null; screenVideo.remove(); screenVideo = null; }
   if (screenBtn) screenBtn.textContent = "Share screen";
 }
-
 async function toggleScreen() {
   if (screenStream) { stopScreen(); return; }
   try {
     screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 4 } });
     screenBtn.textContent = "Stop sharing";
-    // Keep a hidden video playing the stream so a frame is always grabbable.
     screenVideo = document.createElement("video");
     screenVideo.srcObject = screenStream;
     screenVideo.muted = true; screenVideo.playsInline = true;
     screenVideo.style.cssText = "position:fixed;left:-9999px;width:1px;height:1px";
     document.body.appendChild(screenVideo);
     await screenVideo.play().catch(() => {});
-    // Nudge Pulse to look at the freshly shared screen.
     client?.sendUserMessage?.("[The user just shared their screen. Call look_at_screen now, then tell them what you see.]");
     screenStream.getVideoTracks()[0].addEventListener("ended", stopScreen);
   } catch { setStatus("Screen share was cancelled."); }
@@ -294,20 +200,14 @@ async function toggleScreen() {
 
 /* ---------- Companion mode (floating always-on-top window) ---------- */
 async function toggleCompanion() {
-  if (!("documentPictureInPicture" in window)) {
-    setStatus("Companion mode needs a Chromium browser.");
-    return;
-  }
+  if (!("documentPictureInPicture" in window)) { setStatus("Companion mode needs a Chromium browser."); return; }
   if (companionWin && !companionWin.closed) { companionWin.close(); return; }
   companionWin = await window.documentPictureInPicture.requestWindow({ width: 300, height: 380 });
   const d = companionWin.document;
   d.documentElement.style.cssText = "height:100%";
   d.body.style.cssText = "margin:0;height:100%;background:#050505;overflow:hidden";
-  // Don't MOVE the avatar (that empties the center). Show a second video playing
-  // the SAME live stream, so Pulse stays in the portal AND floats in Companion.
   const pipVideo = d.createElement("video");
-  pipVideo.autoplay = true; pipVideo.playsInline = true;
-  pipVideo.muted = true; // audio still comes from the center video — no echo
+  pipVideo.autoplay = true; pipVideo.playsInline = true; pipVideo.muted = true;
   pipVideo.srcObject = videoEl.srcObject;
   pipVideo.style.cssText = "position:fixed;inset:0;width:100%;height:100%;object-fit:cover";
   d.body.append(pipVideo);
@@ -317,8 +217,7 @@ async function toggleCompanion() {
 
 /* ---------- session lifecycle ---------- */
 async function start() {
-  startBtn.disabled = true; // the disabled button is the "working…" signal
-
+  startBtn.disabled = true;
   let sessionToken;
   try {
     const res = await fetch(`${BRAIN}/session-token`, { method: "POST" });
@@ -333,63 +232,45 @@ async function start() {
 
   try {
     client = createClient(sessionToken);
-    window.__pulseClient = client; // test/debug hook
+    window.__pulseClient = client;
 
-    // Capture the conversation as it happens (debounced save to the brain).
     conversationId = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
     client.addListener(AnamEvent.MESSAGE_HISTORY_UPDATED, (messages) => {
       if (Array.isArray(messages)) for (const m of messages) logMsg(m.role === "user" ? "user" : "persona", m.content);
     });
 
-    // Register the fill_form handler BEFORE streaming, or an early tool call is missed.
+    // Register handlers BEFORE streaming, or an early tool call is missed.
     try {
-      client.registerToolCallHandler?.("fill_form", {
-        onStart: async () => {
-          console.log("[pulse] fill_form invoked by the avatar");
-          try { return await fillForm(); }
-          catch (e) { console.error("[pulse] fill_form", e); return "Something went wrong filling that in."; }
+      client.registerToolCallHandler?.("web_search", {
+        onStart: async (p) => {
+          const query = p?.arguments?.query ?? "";
+          console.log("[pulse] web_search", query);
+          try { return await webSearch(String(query)); }
+          catch (e) { console.error("[pulse] web_search", e); return "Something went wrong searching just then."; }
+        },
+      });
+      client.registerToolCallHandler?.("read_page", {
+        onStart: async (p) => {
+          const url = p?.arguments?.url ?? "";
+          console.log("[pulse] read_page", url);
+          try { return await readPage(String(url)); }
+          catch (e) { console.error("[pulse] read_page", e); return "Something went wrong reading that page."; }
         },
       });
       client.registerToolCallHandler?.("look_at_screen", {
         onStart: async () => {
-          console.log("[pulse] look_at_screen invoked by the avatar");
+          console.log("[pulse] look_at_screen invoked");
           try { return await lookAtScreen(); }
           catch (e) { console.error("[pulse] look_at_screen", e); return "I had trouble looking at your screen just then."; }
-        },
-      });
-      client.registerToolCallHandler?.("save_details", {
-        onStart: async (p) => {
-          const d = p?.arguments?.details ?? p?.arguments ?? {};
-          const merged = mergePageProfile(d);
-          console.log("[pulse] save_details", Object.keys(d || {}));
-          return `Saved to your device. I now remember: ${Object.keys(merged).join(", ") || "nothing yet"}.`;
-        },
-      });
-      client.registerToolCallHandler?.("recall_details", {
-        onStart: async () => {
-          const prof = getPageProfile();
-          return Object.keys(prof).length ? JSON.stringify(prof) : "Nothing saved yet, this is a first visit.";
-        },
-      });
-      client.registerToolCallHandler?.("open_and_fill", {
-        onStart: async (p) => {
-          const url = p?.arguments?.url || "";
-          console.log("[pulse] open_and_fill", url);
-          if (!url) return "Tell me the web address of the form and I'll open it and fill it.";
-          openBrowserView(String(url));
-          return "Opening it now. Watch the panel — I'm filling it in for you, and I won't submit anything.";
         },
       });
     } catch (e) { console.warn("[pulse] could not register tools", e); }
 
     client.addListener(AnamEvent.SESSION_READY, () => {
-      setStatus(""); // stay clean on connect — the live avatar + text box are signal enough
+      setStatus("");
       enable(stopBtn, true); enable(screenBtn, true); enable(pipBtn, true);
       if (poster) poster.style.opacity = "0";
-      const known = Object.keys(getPageProfile()).length > 0;
-      client.talk(known
-        ? "Welcome back. Share your screen and point me at any form, and I'll tell you exactly what goes where."
-        : "Hey, I'm Pulse. First time? Tell me your name and the details you fill in a lot, and I'll remember them so I can help you fly through forms next time.");
+      client.talk("I'm Pulse. Ask me anything and I'll go read the web and come back with the real answer, or share your screen and I'll tell you what I see.");
     });
     client.addListener(AnamEvent.CONNECTION_CLOSED, stop);
     await client.streamToVideoElement("persona-video");
@@ -412,63 +293,13 @@ function stop() {
   if (companionWin && !companionWin.closed) companionWin.close();
   stopScreen();
   if (transcriptTimer) { clearTimeout(transcriptTimer); transcriptTimer = null; }
-  saveTranscript(); // flush the final conversation
+  saveTranscript();
   if (client) { client.stopStreaming(); client = null; }
   if (poster) poster.style.opacity = "1";
   enable(stopBtn, false); enable(screenBtn, false); enable(pipBtn, false);
   startBtn.disabled = false;
   setStatus("");
 }
-
-/* ---------- live browser view: Pulse's server-side browser fills a form ---------- */
-const browserView = document.getElementById("browser-view");
-const bvFrame = document.getElementById("bv-frame");
-const bvStatus = document.querySelector(".bv-status");
-const bvUrlForm = document.getElementById("bv-url-form");
-const bvUrl = document.getElementById("bv-url");
-const fillformBtn = document.getElementById("fillform-button");
-let bvPoll = null;
-let bvSession = null;
-
-function openBrowserView(prefillUrl) {
-  browserView?.classList.add("show");
-  if (bvUrlForm) bvUrlForm.style.display = prefillUrl ? "none" : "flex";
-  if (bvFrame) bvFrame.style.display = "none";
-  if (bvStatus) bvStatus.textContent = "Paste a form's address and I'll open it and fill it in.";
-  if (prefillUrl) startBrowserFill(prefillUrl);
-}
-function closeBrowserView() {
-  browserView?.classList.remove("show");
-  if (bvPoll) { clearInterval(bvPoll); bvPoll = null; }
-}
-async function startBrowserFill(url) {
-  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
-  bvSession = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
-  if (bvUrlForm) bvUrlForm.style.display = "none";
-  if (bvFrame) bvFrame.style.display = "block";
-  if (bvStatus) bvStatus.textContent = "Opening the page…";
-  try {
-    const res = await fetch(`${BRAIN}/browser/run`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionId: bvSession, url, profile: getPageProfile() }),
-    });
-    if (!res.ok) { if (bvStatus) bvStatus.textContent = "I couldn't open that address."; return; }
-  } catch { if (bvStatus) bvStatus.textContent = "I couldn't reach the browser just now."; return; }
-  if (bvPoll) clearInterval(bvPoll);
-  bvPoll = setInterval(async () => {
-    try {
-      const r = await fetch(`${BRAIN}/browser/frame?session=${encodeURIComponent(bvSession)}`);
-      if (!r.ok) return;
-      const f = await r.json();
-      if (f.frame && bvFrame) bvFrame.src = f.frame;
-      if (f.message && bvStatus) bvStatus.textContent = f.message;
-      if (f.status === "done" || f.status === "error") { clearInterval(bvPoll); bvPoll = null; }
-    } catch { /* keep polling */ }
-  }, 900);
-}
-fillformBtn?.addEventListener("click", () => openBrowserView());
-bvUrlForm?.addEventListener("submit", (e) => { e.preventDefault(); const u = bvUrl.value.trim(); if (u) startBrowserFill(u); });
-document.getElementById("bv-close")?.addEventListener("click", closeBrowserView);
 
 startBtn?.addEventListener("click", start);
 stopBtn?.addEventListener("click", stop);
