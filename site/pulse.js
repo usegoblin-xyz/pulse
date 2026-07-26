@@ -300,13 +300,16 @@ async function toggleCompanion() {
   const d = companionWin.document;
   d.documentElement.style.cssText = "height:100%";
   d.body.style.cssText = "margin:0;height:100%;background:#050505;overflow:hidden";
-  // position:fixed + inset:0 fills the whole PiP window, so no black gap below.
-  videoEl.style.cssText = "position:fixed;inset:0;width:100%;height:100%;object-fit:cover";
-  d.body.append(videoEl); // the live WebRTC stream keeps playing as it moves
-  companionWin.addEventListener("pagehide", () => {
-    videoEl.style.cssText = "";
-    document.querySelector(".hero").prepend(videoEl);
-  });
+  // Don't MOVE the avatar (that empties the center). Show a second video playing
+  // the SAME live stream, so Pulse stays in the portal AND floats in Companion.
+  const pipVideo = d.createElement("video");
+  pipVideo.autoplay = true; pipVideo.playsInline = true;
+  pipVideo.muted = true; // audio still comes from the center video — no echo
+  pipVideo.srcObject = videoEl.srcObject;
+  pipVideo.style.cssText = "position:fixed;inset:0;width:100%;height:100%;object-fit:cover";
+  d.body.append(pipVideo);
+  await pipVideo.play().catch(() => {});
+  companionWin.addEventListener("pagehide", () => { pipVideo.srcObject = null; });
 }
 
 /* ---------- session lifecycle ---------- */
